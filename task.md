@@ -61,9 +61,15 @@ Deliverables:
 - [x] Add multi-select interface for "Remote", "Onsite", "Hybrid" job types  
 - [x] Validate and send preferences to backend
 
-### Task 2.3: Resume Upload Functionality  
-- Implement file upload (PDF/DOCX) on frontend  
-- Backend support for handling uploaded files and extracting text for analysis
+### Task 2.3: Resume Upload Functionality  (Completed — 2025-11-09)
+- [x] Implement file upload (PDF/DOCX) on frontend — see `frontend/ResumeUpload.jsx`
+- [x] Backend support for handling uploaded files and extracting text for analysis — see `backend/app.py`
+
+Deliverables:
+- `frontend/ResumeUpload.jsx` — React component with drag-and-drop file upload
+- `backend/app.py` — Added `/api/resume-upload`, `/api/resume/<id>`, and `/api/resume/<id>/full-text` endpoints
+- `backend/test_resume_upload.py` — Comprehensive test suite for resume upload API
+- `requirements.txt` — Updated with PyPDF2 and python-docx
 
 ---
 

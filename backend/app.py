@@ -1,12 +1,55 @@
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 import re
+import os
+from werkzeug.utils import secure_filename
+import PyPDF2
+from docx import Document
+import io
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for frontend communication
 
+# Configuration
+UPLOAD_FOLDER = 'uploads'
+ALLOWED_EXTENSIONS = {'pdf', 'docx'}
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+
+# Create uploads directory if it doesn't exist
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.config['MAX_CONTENT_LENGTH'] = MAX_FILE_SIZE
+
 # Store user details in memory (for now - can be replaced with database later)
 user_details_store = {}
+# Store resume data in memory
+resume_store = {}
+
+def allowed_file(filename):
+    """Check if the file extension is allowed"""
+    return '.' in filename and \
+           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def extract_text_from_pdf(file_stream):
+    """Extract text from PDF file"""
+    try:
+        pdf_reader = PyPDF2.PdfReader(file_stream)
+        text = ""
+        for page in pdf_reader.pages:
+            text += page.extract_text() + "\n"
+        return text.strip()
+    except Exception as e:
+        raise Exception(f"Error extracting PDF text: {str(e)}")
+
+def extract_text_from_docx(file_stream):
+    """Extract text from DOCX file"""
+    try:
+        doc = Document(file_stream)
+        text = "\n".join([paragraph.text for paragraph in doc.paragraphs])
+        return text.strip()
+    except Exception as e:
+        raise Exception(f"Error extracting DOCX text: {str(e)}")
 
 def validate_user_details(data):
     """
@@ -175,6 +218,142 @@ def get_user_detail_by_id(user_id):
         return jsonify({
             "success": False,
             "message": "User not found"
+        }), 404
+
+@app.route('/api/resume-upload', methods=['POST'])
+def upload_resume():
+    """
+    Endpoint to handle resume file upload and extract text
+    Expected: multipart/form-data with 'resume' file field
+    """
+    try:
+        # Check if file is in the request
+        if 'resume' not in request.files:
+            return jsonify({
+                "success": False,
+                "message": "No file provided"
+            }), 400
+        
+        file = request.files['resume']
+        
+        # Check if file has a name
+        if file.filename == '':
+            return jsonify({
+                "success": False,
+                "message": "No file selected"
+            }), 400
+        
+        # Check if file type is allowed
+        if not allowed_file(file.filename):
+            return jsonify({
+                "success": False,
+                "message": "Invalid file type. Only PDF and DOCX files are allowed."
+            }), 400
+        
+        # Secure the filename
+        filename = secure_filename(file.filename)
+        file_extension = filename.rsplit('.', 1)[1].lower()
+        
+        # Read file content
+        file_stream = io.BytesIO(file.read())
+        
+        # Extract text based on file type
+        try:
+            if file_extension == 'pdf':
+                extracted_text = extract_text_from_pdf(file_stream)
+            elif file_extension == 'docx':
+                extracted_text = extract_text_from_docx(file_stream)
+            else:
+                return jsonify({
+                    "success": False,
+                    "message": "Unsupported file type"
+                }), 400
+            
+            # Validate that text was extracted
+            if not extracted_text or len(extracted_text.strip()) < 50:
+                return jsonify({
+                    "success": False,
+                    "message": "Could not extract sufficient text from the resume. Please ensure the file is readable and contains text."
+                }), 400
+            
+            # Save the file (optional - for future reference)
+            file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            file_stream.seek(0)  # Reset stream position
+            with open(file_path, 'wb') as f:
+                f.write(file_stream.read())
+            
+            # Store resume data in memory
+            resume_id = len(resume_store) + 1
+            resume_store[resume_id] = {
+                "filename": filename,
+                "file_type": file_extension,
+                "extracted_text": extracted_text,
+                "text_length": len(extracted_text),
+                "file_path": file_path
+            }
+            
+            return jsonify({
+                "success": True,
+                "message": "Resume uploaded and processed successfully",
+                "resume_id": resume_id,
+                "filename": filename,
+                "file_type": file_extension,
+                "text_length": len(extracted_text),
+                "text_preview": extracted_text[:200] + "..." if len(extracted_text) > 200 else extracted_text
+            }), 201
+            
+        except Exception as e:
+            return jsonify({
+                "success": False,
+                "message": f"Error processing file: {str(e)}"
+            }), 500
+            
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Server error: {str(e)}"
+        }), 500
+
+@app.route('/api/resume/<int:resume_id>', methods=['GET'])
+def get_resume(resume_id):
+    """
+    Endpoint to retrieve resume data by ID
+    """
+    if resume_id in resume_store:
+        resume = resume_store[resume_id].copy()
+        # Don't send the full text by default, just metadata
+        resume_data = {
+            "resume_id": resume_id,
+            "filename": resume["filename"],
+            "file_type": resume["file_type"],
+            "text_length": resume["text_length"],
+            "text_preview": resume["extracted_text"][:200] + "..." if len(resume["extracted_text"]) > 200 else resume["extracted_text"]
+        }
+        return jsonify({
+            "success": True,
+            "data": resume_data
+        }), 200
+    else:
+        return jsonify({
+            "success": False,
+            "message": "Resume not found"
+        }), 404
+
+@app.route('/api/resume/<int:resume_id>/full-text', methods=['GET'])
+def get_resume_full_text(resume_id):
+    """
+    Endpoint to retrieve full extracted text from resume
+    """
+    if resume_id in resume_store:
+        return jsonify({
+            "success": True,
+            "resume_id": resume_id,
+            "extracted_text": resume_store[resume_id]["extracted_text"]
+        }), 200
+    else:
+        return jsonify({
+            "success": False,
+            "message": "Resume not found"
         }), 404
 
 if __name__ == '__main__':
