@@ -57,9 +57,9 @@ Deliverables:
 - `frontend/TASK_2.1_README.md` — Comprehensive documentation
 - `setup_task_2.1.sh` — Setup script for both backend and frontend
 
-### Task 2.2: Job Type Selection Component  
-- Add multi-select interface for "Remote", "Onsite", "Hybrid" job types  
-- Validate and send preferences to backend
+### Task 2.2: Job Type Selection Component  (Completed — 2025-11-09)
+- [x] Add multi-select interface for "Remote", "Onsite", "Hybrid" job types  
+- [x] Validate and send preferences to backend
 
 ### Task 2.3: Resume Upload Functionality  
 - Implement file upload (PDF/DOCX) on frontend  
