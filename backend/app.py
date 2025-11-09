@@ -6,6 +6,8 @@ from werkzeug.utils import secure_filename
 import PyPDF2
 from docx import Document
 import io
+from scrapers.indeed_scraper import IndeedScraper
+from scrapers.glassdoor_scraper import GlassdoorScraper
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for frontend communication
@@ -25,6 +27,8 @@ app.config['MAX_CONTENT_LENGTH'] = MAX_FILE_SIZE
 user_details_store = {}
 # Store resume data in memory
 resume_store = {}
+# Store scraped jobs in memory
+scraped_jobs_store = {}
 
 def allowed_file(filename):
     """Check if the file extension is allowed"""
@@ -355,6 +359,138 @@ def get_resume_full_text(resume_id):
             "success": False,
             "message": "Resume not found"
         }), 404
+
+@app.route('/api/scrape-jobs', methods=['POST'])
+def scrape_jobs():
+    """
+    Endpoint to scrape jobs from Indeed and Glassdoor
+    Expected JSON payload:
+    {
+        "job_titles": ["Software Engineer", "Data Scientist"],
+        "location": "New York, NY",
+        "num_pages": 2,
+        "sources": ["indeed", "glassdoor"]  // Optional, defaults to both
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                "success": False,
+                "message": "No data provided"
+            }), 400
+        
+        # Validate required fields
+        if 'job_titles' not in data or not isinstance(data['job_titles'], list):
+            return jsonify({
+                "success": False,
+                "message": "job_titles must be a list"
+            }), 400
+        
+        if 'location' not in data or not data['location']:
+            return jsonify({
+                "success": False,
+                "message": "location is required"
+            }), 400
+        
+        job_titles = data['job_titles']
+        location = data['location']
+        num_pages = data.get('num_pages', 1)
+        sources = data.get('sources', ['indeed', 'glassdoor'])
+        
+        # Validate num_pages
+        if not isinstance(num_pages, int) or num_pages < 1 or num_pages > 5:
+            return jsonify({
+                "success": False,
+                "message": "num_pages must be an integer between 1 and 5"
+            }), 400
+        
+        all_jobs = []
+        scraping_results = {
+            "indeed": {"success": False, "count": 0, "error": None},
+            "glassdoor": {"success": False, "count": 0, "error": None}
+        }
+        
+        # Scrape from Indeed
+        if 'indeed' in sources:
+            try:
+                indeed_scraper = IndeedScraper()
+                for job_title in job_titles:
+                    jobs = indeed_scraper.scrape_jobs(job_title, location, num_pages)
+                    all_jobs.extend(jobs)
+                    scraping_results["indeed"]["count"] += len(jobs)
+                scraping_results["indeed"]["success"] = True
+            except Exception as e:
+                scraping_results["indeed"]["error"] = str(e)
+                print(f"Error scraping Indeed: {str(e)}")
+        
+        # Scrape from Glassdoor
+        if 'glassdoor' in sources:
+            try:
+                glassdoor_scraper = GlassdoorScraper()
+                for job_title in job_titles:
+                    jobs = glassdoor_scraper.scrape_jobs(job_title, location, num_pages)
+                    all_jobs.extend(jobs)
+                    scraping_results["glassdoor"]["count"] += len(jobs)
+                scraping_results["glassdoor"]["success"] = True
+            except Exception as e:
+                scraping_results["glassdoor"]["error"] = str(e)
+                print(f"Error scraping Glassdoor: {str(e)}")
+        
+        # Store scraped jobs
+        scrape_id = len(scraped_jobs_store) + 1
+        scraped_jobs_store[scrape_id] = {
+            "job_titles": job_titles,
+            "location": location,
+            "num_pages": num_pages,
+            "sources": sources,
+            "jobs": all_jobs,
+            "total_jobs": len(all_jobs),
+            "scraping_results": scraping_results
+        }
+        
+        return jsonify({
+            "success": True,
+            "message": f"Scraped {len(all_jobs)} jobs successfully",
+            "scrape_id": scrape_id,
+            "total_jobs": len(all_jobs),
+            "scraping_results": scraping_results,
+            "jobs": all_jobs
+        }), 201
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Server error: {str(e)}"
+        }), 500
+
+@app.route('/api/scrape-jobs/<int:scrape_id>', methods=['GET'])
+def get_scraped_jobs(scrape_id):
+    """
+    Endpoint to retrieve scraped jobs by ID
+    """
+    if scrape_id in scraped_jobs_store:
+        return jsonify({
+            "success": True,
+            "data": scraped_jobs_store[scrape_id]
+        }), 200
+    else:
+        return jsonify({
+            "success": False,
+            "message": "Scrape result not found"
+        }), 404
+
+@app.route('/api/scrape-jobs', methods=['GET'])
+def get_all_scraped_jobs():
+    """
+    Endpoint to retrieve all scraped jobs
+    """
+    return jsonify({
+        "success": True,
+        "count": len(scraped_jobs_store),
+        "data": scraped_jobs_store
+    }), 200
 
 if __name__ == '__main__':
     # Development server. For production use a WSGI server (gunicorn).

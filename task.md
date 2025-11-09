@@ -75,9 +75,22 @@ Deliverables:
 
 ## Phase 3: Job Scraping Module
 
-### Task 3.1: Static Scraping with BeautifulSoup  
-- Develop scraper logic for Indeed and Glassdoor to extract jobs  
-- Extract fields: title, company, location, salary, job type, description, link
+### Task 3.1: Static Scraping with BeautifulSoup  (Completed — 2025-11-09)
+- [x] Develop scraper logic for Indeed and Glassdoor to extract jobs  
+- [x] Extract fields: title, company, location, salary, job type, description, link
+
+Deliverables:
+- `backend/scrapers/base_scraper.py` — Base scraper class with common functionality
+- `backend/scrapers/indeed_scraper.py` — Indeed-specific scraper implementation
+- `backend/scrapers/glassdoor_scraper.py` — Glassdoor-specific scraper implementation
+- `backend/scrapers/__init__.py` — Package initialization
+- `backend/app.py` — Updated with scraping API endpoints
+- `backend/test_scraper.py` — Comprehensive test suite
+- `TASK_3.1_README.md` — Complete documentation
+- `TASK_3.1_QUICKSTART.md` — 5-minute quick start guide
+- `TASK_3.1_ARCHITECTURE.md` — Detailed architecture documentation
+- `TASK_3.1_SUMMARY.md` — Implementation summary
+- `TASK_3.1_CHECKLIST.md` — Completion verification checklist
 
 ### Task 3.2: Dynamic Scraping using Selenium  
 - Handle Javascript loaded content and pagination  
