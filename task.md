@@ -28,10 +28,15 @@ Deliverables:
 - `frontend/README.md` — React/bootstrap scaffold instructions
 - `.gitignore` and `README.md` at project root
 
-### Task 1.3: UI/UX Design  
-- Create wireframes for input forms, results dashboard, application tracker  
-- Define user flow diagrams  
-- Collect feedback and iterate designs
+### Task 1.3: UI/UX Design  (Completed — 2025-11-09)
+- [x] Create wireframes for input forms, results dashboard, application tracker — `docs/ui/wireframes.md`
+- [x] Define user flow diagrams — `docs/ui/user_flows.md`
+- [x] Collect feedback and iterate designs — `docs/ui/feedback_and_iterations.md`
+
+Deliverables:
+- `docs/ui/wireframes.md` — low-fidelity wireframes, screen list, component notes
+- `docs/ui/user_flows.md` — primary user journeys and flow diagrams (textual + ASCII)
+- `docs/ui/feedback_and_iterations.md` — stakeholder feedback log and iteration notes
 
 ---
 
