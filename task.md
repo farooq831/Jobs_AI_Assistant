@@ -37,9 +37,20 @@ Deliverables:
 
 ## Phase 2: User Input Module
 
-### Task 2.1: Develop User Detail Input Forms  
-- Build frontend form to collect name, location, salary range, job titles  
-- Implement client and server-side validations
+### Task 2.1: Develop User Detail Input Forms (Completed — 2025-11-09)
+- [x] Build frontend form to collect name, location, salary range, job titles — see `frontend/UserDetailsForm.jsx`
+- [x] Implement client-side validations — validation logic in UserDetailsForm.jsx
+- [x] Implement server-side validations — validation logic in `backend/app.py`
+
+Deliverables:
+- `frontend/UserDetailsForm.jsx` — React form component with Bootstrap styling
+- `frontend/App.jsx`, `frontend/index.jsx`, `frontend/index.html`, `frontend/App.css` — Supporting frontend files
+- `frontend/package.json` — Frontend dependencies configuration
+- `backend/app.py` — Flask API endpoints with validation (`/api/user-details`)
+- `backend/test_api.py` — API test script
+- `requirements.txt` — Updated with Flask-CORS
+- `frontend/TASK_2.1_README.md` — Comprehensive documentation
+- `setup_task_2.1.sh` — Setup script for both backend and frontend
 
 ### Task 2.2: Job Type Selection Component  
 - Add multi-select interface for "Remote", "Onsite", "Hybrid" job types  
