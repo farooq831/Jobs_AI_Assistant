@@ -394,3 +394,321 @@ def normalize_salary(salary: str) -> Optional[Dict]:
     """
     processor = DataProcessor()
     return processor._normalize_single_salary(salary)
+
+
+class JobFilter:
+    """Handles filtering of jobs based on user preferences"""
+    
+    def __init__(self):
+        """Initialize the job filter"""
+        self.filter_stats = {
+            'total_input': 0,
+            'location_filtered': 0,
+            'salary_filtered': 0,
+            'job_type_filtered': 0,
+            'total_output': 0
+        }
+    
+    def filter_jobs(
+        self,
+        jobs: List[Dict],
+        user_location: Optional[str] = None,
+        salary_min: Optional[float] = None,
+        salary_max: Optional[float] = None,
+        job_types: Optional[List[str]] = None,
+        location_radius_km: int = 50
+    ) -> Tuple[List[Dict], Dict]:
+        """
+        Filter jobs based on user preferences
+        
+        Args:
+            jobs: List of job dictionaries to filter
+            user_location: User's preferred location
+            salary_min: User's minimum salary requirement
+            salary_max: User's maximum salary expectation
+            job_types: List of preferred job types (e.g., ['Remote', 'Hybrid', 'Onsite'])
+            location_radius_km: Radius in km for location matching (default 50km)
+            
+        Returns:
+            Tuple of (filtered_jobs, filter_statistics)
+        """
+        logger.info(f"Starting job filtering for {len(jobs)} jobs")
+        self.filter_stats['total_input'] = len(jobs)
+        
+        filtered_jobs = jobs.copy()
+        
+        # Apply location filter
+        if user_location:
+            filtered_jobs = self._filter_by_location(
+                filtered_jobs, 
+                user_location, 
+                location_radius_km
+            )
+        
+        # Apply salary filter
+        if salary_min is not None or salary_max is not None:
+            filtered_jobs = self._filter_by_salary(
+                filtered_jobs,
+                salary_min,
+                salary_max
+            )
+        
+        # Apply job type filter
+        if job_types:
+            filtered_jobs = self._filter_by_job_type(
+                filtered_jobs,
+                job_types
+            )
+        
+        self.filter_stats['total_output'] = len(filtered_jobs)
+        
+        logger.info(f"Job filtering complete. {len(filtered_jobs)} jobs remaining after filtering")
+        return filtered_jobs, self.filter_stats
+    
+    def _filter_by_location(
+        self,
+        jobs: List[Dict],
+        user_location: str,
+        radius_km: int
+    ) -> List[Dict]:
+        """
+        Filter jobs by location proximity
+        
+        Args:
+            jobs: List of job dictionaries
+            user_location: User's preferred location
+            radius_km: Radius in km for location matching
+            
+        Returns:
+            List of jobs matching location criteria
+        """
+        if not user_location:
+            return jobs
+        
+        user_location_normalized = normalize_location(user_location.lower().strip())
+        filtered = []
+        location_filtered_count = 0
+        
+        for job in jobs:
+            job_location = job.get('location', '').lower().strip()
+            
+            if not job_location:
+                # If job has no location, skip it
+                location_filtered_count += 1
+                continue
+            
+            job_location_normalized = normalize_location(job_location)
+            
+            # Check if job is marked as remote
+            is_remote = self._is_remote_job(job)
+            
+            # Match logic:
+            # 1. Remote jobs always match
+            # 2. Exact location match
+            # 3. Same city/region match (substring match)
+            if is_remote:
+                filtered.append(job)
+            elif user_location_normalized.lower() in job_location_normalized.lower() or \
+                 job_location_normalized.lower() in user_location_normalized.lower():
+                filtered.append(job)
+            else:
+                # For more sophisticated matching, you could use geocoding APIs
+                # For now, we'll be strict about location matching
+                location_filtered_count += 1
+        
+        self.filter_stats['location_filtered'] = location_filtered_count
+        logger.info(f"Location filter: {location_filtered_count} jobs filtered out")
+        
+        return filtered
+    
+    def _filter_by_salary(
+        self,
+        jobs: List[Dict],
+        user_salary_min: Optional[float],
+        user_salary_max: Optional[float]
+    ) -> List[Dict]:
+        """
+        Filter jobs by salary range
+        
+        Args:
+            jobs: List of job dictionaries
+            user_salary_min: User's minimum salary requirement
+            user_salary_max: User's maximum salary expectation
+            
+        Returns:
+            List of jobs matching salary criteria
+        """
+        filtered = []
+        salary_filtered_count = 0
+        
+        for job in jobs:
+            # Check if job has salary information
+            job_salary_min = job.get('salary_min')
+            job_salary_max = job.get('salary_max')
+            
+            # If job has no salary info, include it (can't filter)
+            if job_salary_min is None and job_salary_max is None:
+                filtered.append(job)
+                continue
+            
+            # Convert to float if needed
+            try:
+                if job_salary_min is not None:
+                    job_salary_min = float(job_salary_min)
+                if job_salary_max is not None:
+                    job_salary_max = float(job_salary_max)
+            except (ValueError, TypeError):
+                # If conversion fails, include the job
+                filtered.append(job)
+                continue
+            
+            # Salary matching logic:
+            # Job is a match if there's ANY overlap between user range and job range
+            match = True
+            
+            if user_salary_min is not None and job_salary_max is not None:
+                # User's minimum is higher than job's maximum - filter out
+                if user_salary_min > job_salary_max:
+                    match = False
+            
+            if user_salary_max is not None and job_salary_min is not None:
+                # User's maximum is lower than job's minimum - filter out
+                if user_salary_max < job_salary_min:
+                    match = False
+            
+            if match:
+                filtered.append(job)
+            else:
+                salary_filtered_count += 1
+        
+        self.filter_stats['salary_filtered'] = salary_filtered_count
+        logger.info(f"Salary filter: {salary_filtered_count} jobs filtered out")
+        
+        return filtered
+    
+    def _filter_by_job_type(
+        self,
+        jobs: List[Dict],
+        preferred_types: List[str]
+    ) -> List[Dict]:
+        """
+        Filter jobs by job type (Remote, Onsite, Hybrid)
+        
+        Args:
+            jobs: List of job dictionaries
+            preferred_types: List of preferred job types
+            
+        Returns:
+            List of jobs matching job type preferences
+        """
+        if not preferred_types:
+            return jobs
+        
+        # Normalize preferred types to lowercase
+        preferred_types_lower = [t.lower().strip() for t in preferred_types]
+        
+        filtered = []
+        job_type_filtered_count = 0
+        
+        for job in jobs:
+            job_type = job.get('job_type', '').lower().strip()
+            description = job.get('description', '').lower()
+            title = job.get('title', '').lower()
+            
+            # Determine job type if not explicitly set
+            if not job_type:
+                if self._is_remote_job(job):
+                    job_type = 'remote'
+                elif 'hybrid' in description or 'hybrid' in title:
+                    job_type = 'hybrid'
+                else:
+                    job_type = 'onsite'
+            
+            # Check if job type matches any preferred type
+            if any(pref in job_type for pref in preferred_types_lower):
+                filtered.append(job)
+            else:
+                job_type_filtered_count += 1
+        
+        self.filter_stats['job_type_filtered'] = job_type_filtered_count
+        logger.info(f"Job type filter: {job_type_filtered_count} jobs filtered out")
+        
+        return filtered
+    
+    def _is_remote_job(self, job: Dict) -> bool:
+        """
+        Determine if a job is remote
+        
+        Args:
+            job: Job dictionary
+            
+        Returns:
+            True if job is remote, False otherwise
+        """
+        job_type = job.get('job_type', '').lower()
+        location = job.get('location', '').lower()
+        description = job.get('description', '').lower()
+        title = job.get('title', '').lower()
+        
+        # Check various indicators of remote work
+        remote_indicators = [
+            'remote' in job_type,
+            'remote' in location,
+            'work from home' in description,
+            'wfh' in description,
+            'work from home' in title,
+            'remote' in title,
+            location in ['remote', 'anywhere', 'virtual']
+        ]
+        
+        return any(remote_indicators)
+    
+    def get_filter_statistics(self) -> Dict:
+        """
+        Get filtering statistics
+        
+        Returns:
+            Dictionary with filtering statistics
+        """
+        return self.filter_stats.copy()
+    
+    def reset_statistics(self):
+        """Reset statistics counters"""
+        self.filter_stats = {
+            'total_input': 0,
+            'location_filtered': 0,
+            'salary_filtered': 0,
+            'job_type_filtered': 0,
+            'total_output': 0
+        }
+
+
+# Convenience function for filtering
+def filter_jobs(
+    jobs: List[Dict],
+    user_location: Optional[str] = None,
+    salary_min: Optional[float] = None,
+    salary_max: Optional[float] = None,
+    job_types: Optional[List[str]] = None
+) -> Tuple[List[Dict], Dict]:
+    """
+    Filter jobs based on user preferences
+    
+    Args:
+        jobs: List of job dictionaries
+        user_location: User's preferred location
+        salary_min: User's minimum salary requirement
+        salary_max: User's maximum salary expectation
+        job_types: List of preferred job types
+        
+    Returns:
+        Tuple of (filtered_jobs, statistics)
+    """
+    job_filter = JobFilter()
+    return job_filter.filter_jobs(
+        jobs,
+        user_location,
+        salary_min,
+        salary_max,
+        job_types
+    )
