@@ -145,7 +145,7 @@ Deliverables:
 - `docs/tasks/TASK_4.1_COMPLETION.md` — Implementation summary and achievements
 - `docs/tasks/TASK_4.1_CHECKLIST.md` — Verification checklist
 
-### 
+### Task 4.2
  (Completed — 2025-11-10)
 - [x] Filter jobs based on user location, salary, and job type preferences — see `backend/data_processor.py` (JobFilter class)
 - [x] Prepare filtered data for scoring — API endpoints and filtering pipeline ready
@@ -164,9 +164,21 @@ Deliverables:
 
 ## Phase 5: Job Matching and Scoring Module
 
-### Task 5.1: Keyword Extraction  
-- Use NLP tools (spaCy) to tokenize job titles and descriptions  
-- Extract relevant keywords based on user job titles and resume
+### Task 5.1: Keyword Extraction  (Completed — 2025-11-10)
+- [x] Use NLP tools (spaCy) to tokenize job titles and descriptions  
+- [x] Extract relevant keywords based on user job titles and resume
+
+Deliverables:
+- `backend/keyword_extractor.py` — Core NLP module with spaCy integration (400+ lines)
+- `backend/app.py` — Added 5 keyword extraction endpoints
+- `backend/test_keyword_extraction.py` — Comprehensive test suite (15+ test cases)
+- `docs/tasks/TASK_5.1_README.md` — Complete documentation with API examples
+- `docs/tasks/TASK_5.1_QUICKSTART.md` — 5-minute quick start guide
+- `docs/tasks/TASK_5.1_ARCHITECTURE.md` — Technical architecture and NLP pipeline details
+- `docs/tasks/TASK_5.1_COMPLETION.md` — Implementation summary and achievements
+- `docs/tasks/TASK_5.1_CHECKLIST.md` — Verification checklist
+- `scripts/setup_task_5.1.ps1` — Setup script for spaCy installation
+- `requirements.txt` — Already includes spacy==3.6.0
 
 ### Task 5.2: Scoring Algorithm  
 - Develop weighted scoring function combining keyword match, salary range, location, and job type  
