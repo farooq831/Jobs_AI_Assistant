@@ -11,7 +11,7 @@ from scrapers.glassdoor_scraper import GlassdoorScraper
 from scrapers.indeed_selenium_scraper import IndeedSeleniumScraper
 from scrapers.glassdoor_selenium_scraper import GlassdoorSeleniumScraper
 from storage_manager import JobStorageManager
-from data_processor import DataProcessor, clean_job_data
+from data_processor import DataProcessor, clean_job_data, filter_jobs
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for frontend communication
@@ -966,6 +966,149 @@ def get_cleaning_stats():
         return jsonify({
             "success": False,
             "message": f"Error analyzing data: {str(e)}"
+        }), 500
+
+
+@app.route('/api/filter-jobs', methods=['POST'])
+def filter_jobs_endpoint():
+    """
+    Filter jobs based on user preferences
+    
+    Expected JSON payload:
+    {
+        "jobs": [...],  // Optional - if not provided, uses stored jobs
+        "user_location": "New York, NY",  // Optional
+        "salary_min": 50000,  // Optional
+        "salary_max": 150000,  // Optional
+        "job_types": ["Remote", "Hybrid"]  // Optional - Remote, Onsite, Hybrid
+    }
+    
+    Returns filtered jobs and filtering statistics
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                "success": False,
+                "message": "No data provided"
+            }), 400
+        
+        # Get jobs to filter (either from request or storage)
+        jobs = data.get('jobs')
+        if not jobs:
+            # If no jobs provided, get from storage
+            jobs = storage_manager.get_all_jobs()
+            
+            if not jobs:
+                return jsonify({
+                    "success": False,
+                    "message": "No jobs available to filter. Please scrape jobs first."
+                }), 404
+        
+        # Extract filter criteria
+        user_location = data.get('user_location')
+        salary_min = data.get('salary_min')
+        salary_max = data.get('salary_max')
+        job_types = data.get('job_types')
+        
+        # Validate salary range if both provided
+        if salary_min is not None and salary_max is not None:
+            if salary_min > salary_max:
+                return jsonify({
+                    "success": False,
+                    "message": "salary_min cannot be greater than salary_max"
+                }), 400
+        
+        # Apply filters
+        filtered_jobs, stats = filter_jobs(
+            jobs,
+            user_location=user_location,
+            salary_min=salary_min,
+            salary_max=salary_max,
+            job_types=job_types
+        )
+        
+        return jsonify({
+            "success": True,
+            "message": "Jobs filtered successfully",
+            "statistics": stats,
+            "filtered_jobs_count": len(filtered_jobs),
+            "jobs": filtered_jobs
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Error filtering jobs: {str(e)}"
+        }), 500
+
+
+@app.route('/api/filter-jobs/user/<int:user_id>', methods=['POST'])
+def filter_jobs_by_user_preferences(user_id):
+    """
+    Filter stored jobs based on a specific user's preferences
+    
+    Uses the user details stored from /api/user-details endpoint
+    
+    Optional JSON payload:
+    {
+        "job_types": ["Remote", "Hybrid"]  // Override job type preferences
+    }
+    
+    Returns filtered jobs matching user's location and salary preferences
+    """
+    try:
+        # Get user details
+        if user_id not in user_details_store:
+            return jsonify({
+                "success": False,
+                "message": f"User with ID {user_id} not found"
+            }), 404
+        
+        user_details = user_details_store[user_id]
+        
+        # Get jobs from storage
+        jobs = storage_manager.get_all_jobs()
+        
+        if not jobs:
+            return jsonify({
+                "success": False,
+                "message": "No jobs available to filter. Please scrape jobs first."
+            }), 404
+        
+        # Get optional job types from request
+        data = request.get_json() if request.get_json() else {}
+        job_types = data.get('job_types')
+        
+        # Apply filters using user's preferences
+        filtered_jobs, stats = filter_jobs(
+            jobs,
+            user_location=user_details.get('location'),
+            salary_min=user_details.get('salary_min'),
+            salary_max=user_details.get('salary_max'),
+            job_types=job_types
+        )
+        
+        return jsonify({
+            "success": True,
+            "message": f"Jobs filtered for user {user_details.get('name')}",
+            "user_details": {
+                "name": user_details.get('name'),
+                "location": user_details.get('location'),
+                "salary_min": user_details.get('salary_min'),
+                "salary_max": user_details.get('salary_max'),
+                "job_types": job_types
+            },
+            "statistics": stats,
+            "filtered_jobs_count": len(filtered_jobs),
+            "jobs": filtered_jobs
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Error filtering jobs: {str(e)}"
         }), 500
 
 
