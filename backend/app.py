@@ -11,6 +11,7 @@ from scrapers.glassdoor_scraper import GlassdoorScraper
 from scrapers.indeed_selenium_scraper import IndeedSeleniumScraper
 from scrapers.glassdoor_selenium_scraper import GlassdoorSeleniumScraper
 from storage_manager import JobStorageManager
+from data_processor import DataProcessor, clean_job_data
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for frontend communication
@@ -851,6 +852,122 @@ def export_stored_jobs():
             "success": False,
             "message": f"Error exporting jobs: {str(e)}"
         }), 500
+
+
+@app.route('/api/clean-data', methods=['POST'])
+def clean_data():
+    """
+    Clean and normalize job data
+    Removes duplicates, incomplete entries, and normalizes locations and salaries
+    
+    Request body:
+    {
+        "jobs": [...],  # Optional: provide jobs to clean, or clean stored jobs
+        "save": true    # Optional: save cleaned data back to storage (default: false)
+    }
+    
+    Returns cleaned jobs and statistics
+    """
+    try:
+        data = request.get_json()
+        save_to_storage = data.get('save', False) if data else False
+        
+        # Get jobs to clean
+        if data and 'jobs' in data:
+            jobs = data['jobs']
+        else:
+            # Load jobs from storage
+            jobs = storage_manager.get_all_jobs()
+        
+        if not jobs:
+            return jsonify({
+                "success": False,
+                "message": "No jobs to clean. Please provide jobs or scrape data first."
+            }), 400
+        
+        # Clean the data
+        cleaned_jobs, stats = clean_job_data(jobs)
+        
+        # Optionally save back to storage
+        if save_to_storage:
+            storage_manager.clear_jobs()
+            for job in cleaned_jobs:
+                storage_manager.add_job(job)
+            
+        return jsonify({
+            "success": True,
+            "message": "Data cleaning completed successfully",
+            "statistics": stats,
+            "cleaned_jobs_count": len(cleaned_jobs),
+            "jobs": cleaned_jobs
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Error cleaning data: {str(e)}"
+        }), 500
+
+
+@app.route('/api/clean-data/stats', methods=['GET'])
+def get_cleaning_stats():
+    """
+    Get statistics about stored jobs and potential cleaning improvements
+    
+    Returns job statistics and cleaning recommendations
+    """
+    try:
+        jobs = storage_manager.get_all_jobs()
+        
+        if not jobs:
+            return jsonify({
+                "success": False,
+                "message": "No jobs found in storage"
+            }), 404
+        
+        # Analyze data for potential issues
+        processor = DataProcessor()
+        
+        # Count potential duplicates
+        seen_hashes = set()
+        duplicates = 0
+        for job in jobs:
+            job_hash = processor._generate_job_hash(job)
+            if job_hash in seen_hashes:
+                duplicates += 1
+            seen_hashes.add(job_hash)
+        
+        # Count incomplete entries
+        incomplete = sum(1 for job in jobs if not all(
+            job.get(field) and str(job.get(field)).strip()
+            for field in processor.REQUIRED_FIELDS
+        ))
+        
+        # Count entries with unnormalized data
+        unnormalized_locations = sum(1 for job in jobs 
+            if 'location' in job and job['location'] and 
+            processor._normalize_single_location(job['location']) != job['location'])
+        
+        unnormalized_salaries = sum(1 for job in jobs 
+            if 'salary' in job and job['salary'] and 
+            not job.get('salary_min'))
+        
+        return jsonify({
+            "success": True,
+            "total_jobs": len(jobs),
+            "potential_duplicates": duplicates,
+            "incomplete_entries": incomplete,
+            "unnormalized_locations": unnormalized_locations,
+            "unnormalized_salaries": unnormalized_salaries,
+            "recommendation": "Run /api/clean-data with save=true to clean the data" if (duplicates > 0 or incomplete > 0) else "Data appears clean"
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Error analyzing data: {str(e)}"
+        }), 500
+
 
 if __name__ == '__main__':
     # Development server. For production use a WSGI server (gunicorn).
