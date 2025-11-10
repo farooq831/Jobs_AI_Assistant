@@ -180,9 +180,19 @@ Deliverables:
 - `scripts/setup_task_5.1.ps1` — Setup script for spaCy installation
 - `requirements.txt` — Already includes spacy==3.6.0
 
-### Task 5.2: Scoring Algorithm  
-- Develop weighted scoring function combining keyword match, salary range, location, and job type  
-- Define thresholds for Red, Yellow, and White highlights
+### Task 5.2: Scoring Algorithm (Completed — 2025-11-10)
+- [x] Develop weighted scoring function combining keyword match, salary range, location, and job type — see `backend/job_scorer.py`
+- [x] Define thresholds for Red, Yellow, and White highlights — thresholds implemented in JobScorer class
+
+Deliverables:
+- `backend/job_scorer.py` — Core scoring module with weighted algorithm (520 lines)
+- `backend/test_scoring.py` — Comprehensive test suite (36 tests, all passing)
+- `backend/app.py` — Added 5 scoring endpoints (`/api/score-job`, `/api/score-jobs`, `/api/score-stored-jobs/<user_id>`, `/api/score-thresholds`, `/api/update-weights`)
+- `docs/tasks/TASK_5.2_README.md` — Complete usage documentation
+- `docs/tasks/TASK_5.2_QUICKSTART.md` — 5-minute quick start guide
+- `docs/tasks/TASK_5.2_ARCHITECTURE.md` — Technical architecture details
+- `docs/tasks/TASK_5.2_COMPLETION.md` — Implementation summary and achievements
+- `docs/tasks/TASK_5.2_CHECKLIST.md` — Verification checklist
 
 ### Task 5.3: Score Integration into Data Model  
 - Add scores and flags to the job listings data structure
