@@ -12,6 +12,7 @@ from scrapers.indeed_selenium_scraper import IndeedSeleniumScraper
 from scrapers.glassdoor_selenium_scraper import GlassdoorSeleniumScraper
 from storage_manager import JobStorageManager
 from data_processor import DataProcessor, clean_job_data, filter_jobs
+from keyword_extractor import get_keyword_extractor
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for frontend communication
@@ -1109,6 +1110,321 @@ def filter_jobs_by_user_preferences(user_id):
         return jsonify({
             "success": False,
             "message": f"Error filtering jobs: {str(e)}"
+        }), 500
+
+
+# ============================================================================
+# KEYWORD EXTRACTION ENDPOINTS (Task 5.1)
+# ============================================================================
+
+@app.route('/api/extract-keywords/job', methods=['POST'])
+def extract_job_keywords():
+    """
+    Extract keywords from job posting data.
+    
+    Expected JSON:
+    {
+        "title": "Software Engineer",
+        "description": "Job description text...",
+        "job_id": "optional-job-id"
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                "success": False,
+                "message": "No data provided"
+            }), 400
+        
+        title = data.get('title', '')
+        description = data.get('description', '')
+        
+        if not title and not description:
+            return jsonify({
+                "success": False,
+                "message": "Either title or description must be provided"
+            }), 400
+        
+        # Get keyword extractor
+        extractor = get_keyword_extractor()
+        
+        # Extract keywords
+        job_data = {
+            'title': title,
+            'description': description
+        }
+        
+        keywords = extractor.extract_job_keywords(job_data)
+        
+        return jsonify({
+            "success": True,
+            "job_id": data.get('job_id'),
+            "keywords": keywords,
+            "message": "Keywords extracted successfully"
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Error extracting keywords: {str(e)}"
+        }), 500
+
+
+@app.route('/api/extract-keywords/resume', methods=['POST'])
+def extract_resume_keywords():
+    """
+    Extract keywords from resume text.
+    
+    Expected JSON:
+    {
+        "resume_text": "Resume content...",
+        "resume_id": "optional-resume-id"
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                "success": False,
+                "message": "No data provided"
+            }), 400
+        
+        resume_text = data.get('resume_text', '')
+        
+        if not resume_text or len(resume_text.strip()) < 50:
+            return jsonify({
+                "success": False,
+                "message": "Resume text must be at least 50 characters"
+            }), 400
+        
+        # Get keyword extractor
+        extractor = get_keyword_extractor()
+        
+        # Extract keywords
+        keywords = extractor.extract_resume_keywords(resume_text)
+        
+        return jsonify({
+            "success": True,
+            "resume_id": data.get('resume_id'),
+            "keywords": keywords,
+            "message": "Keywords extracted successfully"
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Error extracting keywords: {str(e)}"
+        }), 500
+
+
+@app.route('/api/extract-keywords/resume/<resume_id>', methods=['GET'])
+def extract_keywords_from_stored_resume(resume_id):
+    """
+    Extract keywords from a previously uploaded resume.
+    """
+    try:
+        # Get resume from storage
+        resume_data = uploaded_resumes.get(resume_id)
+        
+        if not resume_data:
+            return jsonify({
+                "success": False,
+                "message": "Resume not found"
+            }), 404
+        
+        resume_text = resume_data.get('extracted_text', '')
+        
+        if not resume_text:
+            return jsonify({
+                "success": False,
+                "message": "No text available for this resume"
+            }), 400
+        
+        # Get keyword extractor
+        extractor = get_keyword_extractor()
+        
+        # Extract keywords
+        keywords = extractor.extract_resume_keywords(resume_text)
+        
+        return jsonify({
+            "success": True,
+            "resume_id": resume_id,
+            "resume_filename": resume_data.get('filename'),
+            "keywords": keywords,
+            "message": "Keywords extracted successfully"
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Error extracting keywords: {str(e)}"
+        }), 500
+
+
+@app.route('/api/match-keywords', methods=['POST'])
+def match_keywords():
+    """
+    Calculate keyword match between job and resume.
+    
+    Expected JSON:
+    {
+        "job_keywords": {...},  // Output from extract_job_keywords
+        "resume_keywords": {...}  // Output from extract_resume_keywords
+    }
+    
+    OR
+    
+    {
+        "job_id": "job-123",
+        "resume_id": "resume-456"
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                "success": False,
+                "message": "No data provided"
+            }), 400
+        
+        # Get keyword extractor
+        extractor = get_keyword_extractor()
+        
+        # Option 1: Direct keyword objects provided
+        if 'job_keywords' in data and 'resume_keywords' in data:
+            job_keywords = data['job_keywords']
+            resume_keywords = data['resume_keywords']
+        
+        # Option 2: Extract from stored job and resume
+        elif 'job_id' in data and 'resume_id' in data:
+            job_id = data['job_id']
+            resume_id = data['resume_id']
+            
+            # Get job from storage
+            storage = JobStorageManager()
+            all_jobs = storage.get_all_jobs()
+            job = next((j for j in all_jobs if j.get('id') == job_id), None)
+            
+            if not job:
+                return jsonify({
+                    "success": False,
+                    "message": f"Job {job_id} not found"
+                }), 404
+            
+            # Get resume from storage
+            resume_data = uploaded_resumes.get(resume_id)
+            
+            if not resume_data:
+                return jsonify({
+                    "success": False,
+                    "message": f"Resume {resume_id} not found"
+                }), 404
+            
+            # Extract keywords
+            job_keywords = extractor.extract_job_keywords(job)
+            resume_keywords = extractor.extract_resume_keywords(resume_data.get('extracted_text', ''))
+        
+        else:
+            return jsonify({
+                "success": False,
+                "message": "Either provide job_keywords and resume_keywords, or job_id and resume_id"
+            }), 400
+        
+        # Calculate match
+        match_result = extractor.calculate_keyword_match(job_keywords, resume_keywords)
+        
+        return jsonify({
+            "success": True,
+            "match_result": match_result,
+            "message": "Keyword match calculated successfully"
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Error calculating keyword match: {str(e)}"
+        }), 500
+
+
+@app.route('/api/batch-extract-keywords/jobs', methods=['POST'])
+def batch_extract_job_keywords():
+    """
+    Extract keywords from multiple jobs at once.
+    
+    Expected JSON:
+    {
+        "job_ids": ["job1", "job2", ...]  // Optional: specific job IDs
+        "limit": 10  // Optional: limit number of jobs
+    }
+    
+    If no job_ids provided, processes all jobs in storage.
+    """
+    try:
+        data = request.get_json() or {}
+        
+        # Get jobs from storage
+        storage = JobStorageManager()
+        all_jobs = storage.get_all_jobs()
+        
+        # Filter by job_ids if provided
+        job_ids = data.get('job_ids', [])
+        if job_ids:
+            jobs_to_process = [j for j in all_jobs if j.get('id') in job_ids]
+        else:
+            jobs_to_process = all_jobs
+        
+        # Apply limit if provided
+        limit = data.get('limit')
+        if limit:
+            jobs_to_process = jobs_to_process[:limit]
+        
+        if not jobs_to_process:
+            return jsonify({
+                "success": False,
+                "message": "No jobs found to process"
+            }), 404
+        
+        # Get keyword extractor
+        extractor = get_keyword_extractor()
+        
+        # Extract keywords for each job
+        results = []
+        for job in jobs_to_process:
+            try:
+                keywords = extractor.extract_job_keywords(job)
+                results.append({
+                    "job_id": job.get('id'),
+                    "job_title": job.get('title'),
+                    "keywords": keywords,
+                    "success": True
+                })
+            except Exception as e:
+                results.append({
+                    "job_id": job.get('id'),
+                    "job_title": job.get('title'),
+                    "error": str(e),
+                    "success": False
+                })
+        
+        successful = sum(1 for r in results if r['success'])
+        
+        return jsonify({
+            "success": True,
+            "total_jobs": len(jobs_to_process),
+            "successful": successful,
+            "failed": len(results) - successful,
+            "results": results,
+            "message": f"Processed {len(results)} jobs"
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Error batch extracting keywords: {str(e)}"
         }), 500
 
 
