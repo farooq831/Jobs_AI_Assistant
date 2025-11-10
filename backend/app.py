@@ -8,6 +8,8 @@ from docx import Document
 import io
 from scrapers.indeed_scraper import IndeedScraper
 from scrapers.glassdoor_scraper import GlassdoorScraper
+from scrapers.indeed_selenium_scraper import IndeedSeleniumScraper
+from scrapers.glassdoor_selenium_scraper import GlassdoorSeleniumScraper
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for frontend communication
@@ -491,6 +493,115 @@ def get_all_scraped_jobs():
         "count": len(scraped_jobs_store),
         "data": scraped_jobs_store
     }), 200
+
+@app.route('/api/scrape-jobs-dynamic', methods=['POST'])
+def scrape_jobs_dynamic():
+    """
+    Endpoint to scrape jobs using Selenium for dynamic content
+    Handles JavaScript-loaded content and pagination
+    Expected JSON payload:
+    {
+        "job_titles": ["Software Engineer", "Data Scientist"],
+        "location": "New York, NY",
+        "num_pages": 2,
+        "sources": ["indeed", "glassdoor"],  // Optional, defaults to both
+        "headless": true  // Optional, defaults to true
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                "success": False,
+                "message": "No data provided"
+            }), 400
+        
+        # Validate required fields
+        if 'job_titles' not in data or not isinstance(data['job_titles'], list):
+            return jsonify({
+                "success": False,
+                "message": "job_titles must be a list"
+            }), 400
+        
+        if 'location' not in data or not data['location']:
+            return jsonify({
+                "success": False,
+                "message": "location is required"
+            }), 400
+        
+        job_titles = data['job_titles']
+        location = data['location']
+        num_pages = data.get('num_pages', 1)
+        sources = data.get('sources', ['indeed', 'glassdoor'])
+        headless = data.get('headless', True)
+        
+        # Validate num_pages
+        if not isinstance(num_pages, int) or num_pages < 1 or num_pages > 5:
+            return jsonify({
+                "success": False,
+                "message": "num_pages must be an integer between 1 and 5"
+            }), 400
+        
+        all_jobs = []
+        scraping_results = {
+            "indeed": {"success": False, "count": 0, "error": None},
+            "glassdoor": {"success": False, "count": 0, "error": None}
+        }
+        
+        # Scrape from Indeed using Selenium
+        if 'indeed' in sources:
+            try:
+                indeed_scraper = IndeedSeleniumScraper(headless=headless)
+                for job_title in job_titles:
+                    jobs = indeed_scraper.scrape_jobs(job_title, location, num_pages)
+                    all_jobs.extend(jobs)
+                    scraping_results["indeed"]["count"] += len(jobs)
+                scraping_results["indeed"]["success"] = True
+            except Exception as e:
+                scraping_results["indeed"]["error"] = str(e)
+                print(f"Error scraping Indeed with Selenium: {str(e)}")
+        
+        # Scrape from Glassdoor using Selenium
+        if 'glassdoor' in sources:
+            try:
+                glassdoor_scraper = GlassdoorSeleniumScraper(headless=headless)
+                for job_title in job_titles:
+                    jobs = glassdoor_scraper.scrape_jobs(job_title, location, num_pages)
+                    all_jobs.extend(jobs)
+                    scraping_results["glassdoor"]["count"] += len(jobs)
+                scraping_results["glassdoor"]["success"] = True
+            except Exception as e:
+                scraping_results["glassdoor"]["error"] = str(e)
+                print(f"Error scraping Glassdoor with Selenium: {str(e)}")
+        
+        # Store scraped jobs
+        scrape_id = len(scraped_jobs_store) + 1
+        scraped_jobs_store[scrape_id] = {
+            "job_titles": job_titles,
+            "location": location,
+            "num_pages": num_pages,
+            "sources": sources,
+            "method": "selenium",
+            "jobs": all_jobs,
+            "total_jobs": len(all_jobs),
+            "scraping_results": scraping_results
+        }
+        
+        return jsonify({
+            "success": True,
+            "message": f"Scraped {len(all_jobs)} jobs successfully using Selenium",
+            "scrape_id": scrape_id,
+            "total_jobs": len(all_jobs),
+            "scraping_results": scraping_results,
+            "jobs": all_jobs
+        }), 201
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Server error: {str(e)}"
+        }), 500
 
 if __name__ == '__main__':
     # Development server. For production use a WSGI server (gunicorn).
