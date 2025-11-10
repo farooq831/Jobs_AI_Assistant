@@ -10,6 +10,7 @@ from scrapers.indeed_scraper import IndeedScraper
 from scrapers.glassdoor_scraper import GlassdoorScraper
 from scrapers.indeed_selenium_scraper import IndeedSeleniumScraper
 from scrapers.glassdoor_selenium_scraper import GlassdoorSeleniumScraper
+from storage_manager import JobStorageManager
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for frontend communication
@@ -31,6 +32,9 @@ user_details_store = {}
 resume_store = {}
 # Store scraped jobs in memory
 scraped_jobs_store = {}
+
+# Initialize storage manager for persistent job storage
+storage_manager = JobStorageManager(storage_dir='data')
 
 def allowed_file(filename):
     """Check if the file extension is allowed"""
@@ -452,12 +456,27 @@ def scrape_jobs():
             "scraping_results": scraping_results
         }
         
+        # Save to persistent storage
+        storage_result = storage_manager.save_jobs(
+            all_jobs, 
+            source=",".join(sources),
+            skip_duplicates=True
+        )
+        
+        # Save to persistent storage
+        storage_result = storage_manager.save_jobs(
+            all_jobs, 
+            source=",".join(sources),
+            skip_duplicates=True
+        )
+        
         return jsonify({
             "success": True,
             "message": f"Scraped {len(all_jobs)} jobs successfully",
             "scrape_id": scrape_id,
             "total_jobs": len(all_jobs),
             "scraping_results": scraping_results,
+            "storage_result": storage_result,
             "jobs": all_jobs
         }), 201
         
@@ -588,12 +607,27 @@ def scrape_jobs_dynamic():
             "scraping_results": scraping_results
         }
         
+        # Save to persistent storage
+        storage_result = storage_manager.save_jobs(
+            all_jobs, 
+            source=",".join(sources) + "_selenium",
+            skip_duplicates=True
+        )
+        
+        # Save to persistent storage
+        storage_result = storage_manager.save_jobs(
+            all_jobs, 
+            source=",".join(sources) + "_selenium",
+            skip_duplicates=True
+        )
+        
         return jsonify({
             "success": True,
             "message": f"Scraped {len(all_jobs)} jobs successfully using Selenium",
             "scrape_id": scrape_id,
             "total_jobs": len(all_jobs),
             "scraping_results": scraping_results,
+            "storage_result": storage_result,
             "jobs": all_jobs
         }), 201
         
@@ -601,6 +635,221 @@ def scrape_jobs_dynamic():
         return jsonify({
             "success": False,
             "message": f"Server error: {str(e)}"
+        }), 500
+
+# ==================== Storage Management Endpoints ====================
+
+@app.route('/api/storage/jobs', methods=['GET'])
+def get_stored_jobs():
+    """
+    Endpoint to retrieve all stored jobs with optional filtering
+    Query parameters:
+    - source: Filter by source (e.g., 'indeed', 'glassdoor')
+    - location: Filter by location
+    - limit: Maximum number of jobs to return
+    - offset: Number of jobs to skip
+    """
+    try:
+        # Get query parameters
+        source = request.args.get('source')
+        location = request.args.get('location')
+        limit = request.args.get('limit', type=int)
+        offset = request.args.get('offset', type=int, default=0)
+        
+        # Build filters
+        filters = {}
+        if source:
+            filters['source'] = source
+        if location:
+            filters['location'] = location
+        
+        # Get jobs
+        jobs = storage_manager.get_all_jobs(filters if filters else None)
+        
+        # Apply pagination
+        total = len(jobs)
+        if limit:
+            jobs = jobs[offset:offset + limit]
+        else:
+            jobs = jobs[offset:]
+        
+        return jsonify({
+            "success": True,
+            "total": total,
+            "count": len(jobs),
+            "offset": offset,
+            "jobs": jobs
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Error retrieving jobs: {str(e)}"
+        }), 500
+
+@app.route('/api/storage/jobs/<job_id>', methods=['GET'])
+def get_stored_job(job_id):
+    """
+    Endpoint to retrieve a specific job by ID
+    """
+    try:
+        job = storage_manager.get_job_by_id(job_id)
+        
+        if job:
+            return jsonify({
+                "success": True,
+                "job": job
+            }), 200
+        else:
+            return jsonify({
+                "success": False,
+                "message": "Job not found"
+            }), 404
+            
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Error retrieving job: {str(e)}"
+        }), 500
+
+@app.route('/api/storage/jobs/<job_id>', methods=['DELETE'])
+def delete_stored_job(job_id):
+    """
+    Endpoint to delete a specific job by ID
+    """
+    try:
+        success = storage_manager.delete_job(job_id)
+        
+        if success:
+            return jsonify({
+                "success": True,
+                "message": "Job deleted successfully"
+            }), 200
+        else:
+            return jsonify({
+                "success": False,
+                "message": "Job not found or deletion failed"
+            }), 404
+            
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Error deleting job: {str(e)}"
+        }), 500
+
+@app.route('/api/storage/jobs', methods=['DELETE'])
+def clear_stored_jobs():
+    """
+    Endpoint to clear all stored jobs
+    """
+    try:
+        success = storage_manager.clear_all_jobs()
+        
+        if success:
+            return jsonify({
+                "success": True,
+                "message": "All jobs cleared successfully"
+            }), 200
+        else:
+            return jsonify({
+                "success": False,
+                "message": "Failed to clear jobs"
+            }), 500
+            
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Error clearing jobs: {str(e)}"
+        }), 500
+
+@app.route('/api/storage/statistics', methods=['GET'])
+def get_storage_statistics():
+    """
+    Endpoint to get storage statistics
+    """
+    try:
+        stats = storage_manager.get_statistics()
+        
+        return jsonify({
+            "success": True,
+            "statistics": stats
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Error retrieving statistics: {str(e)}"
+        }), 500
+
+@app.route('/api/storage/errors', methods=['GET'])
+def get_storage_errors():
+    """
+    Endpoint to get recent scraping errors
+    Query parameters:
+    - limit: Maximum number of errors to return (default: 10)
+    """
+    try:
+        limit = request.args.get('limit', type=int, default=10)
+        errors = storage_manager.get_recent_errors(limit)
+        
+        return jsonify({
+            "success": True,
+            "count": len(errors),
+            "errors": errors
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Error retrieving errors: {str(e)}"
+        }), 500
+
+@app.route('/api/storage/export', methods=['POST'])
+def export_stored_jobs():
+    """
+    Endpoint to export jobs to a JSON file
+    Expected JSON payload:
+    {
+        "output_file": "exported_jobs.json",
+        "filters": {
+            "source": "indeed",
+            "location": "New York"
+        }
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data or 'output_file' not in data:
+            return jsonify({
+                "success": False,
+                "message": "output_file is required"
+            }), 400
+        
+        output_file = data['output_file']
+        filters = data.get('filters')
+        
+        # Ensure output file is in data directory for security
+        output_path = os.path.join('data', os.path.basename(output_file))
+        
+        success = storage_manager.export_to_json(output_path, filters)
+        
+        if success:
+            return jsonify({
+                "success": True,
+                "message": f"Jobs exported to {output_path}",
+                "file": output_path
+            }), 200
+        else:
+            return jsonify({
+                "success": False,
+                "message": "Export failed"
+            }), 500
+            
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Error exporting jobs: {str(e)}"
         }), 500
 
 if __name__ == '__main__':
