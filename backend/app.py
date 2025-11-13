@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 import re
 import os
@@ -6,6 +6,7 @@ from werkzeug.utils import secure_filename
 import PyPDF2
 from docx import Document
 import io
+from datetime import datetime
 from scrapers.indeed_scraper import IndeedScraper
 from scrapers.glassdoor_scraper import GlassdoorScraper
 from scrapers.indeed_selenium_scraper import IndeedSeleniumScraper
@@ -15,6 +16,7 @@ from data_processor import DataProcessor, clean_job_data, filter_jobs
 from keyword_extractor import get_keyword_extractor
 from job_scorer import get_job_scorer
 from resume_analyzer import get_resume_analyzer
+from excel_exporter import export_jobs_to_excel
 import requests
 
 app = Flask(__name__)
@@ -2811,21 +2813,224 @@ def batch_generate_optimization_tips():
         }), 500
 
 
+# ===== EXCEL EXPORT ENDPOINTS =====
+
+@app.route('/api/export/excel', methods=['POST'])
+def export_jobs_excel():
+    """
+    Export jobs to Excel with color-coding and optional resume tips.
+    
+    Request JSON:
+    {
+        "jobs": [...],           # List of job dictionaries with scores
+        "resume_tips": {...},    # Optional: resume optimization tips
+        "include_tips_sheet": true,  # Optional: include separate tips sheet
+        "filename": "jobs.xlsx"  # Optional: custom filename
+    }
+    
+    Returns:
+        Excel file download
+    """
+    try:
+        data = request.get_json()
+        
+        if not data or 'jobs' not in data:
+            return jsonify({'error': 'Missing jobs data'}), 400
+        
+        jobs = data['jobs']
+        resume_tips = data.get('resume_tips')
+        include_tips_sheet = data.get('include_tips_sheet', True)
+        filename = data.get('filename', f'jobs_export_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx')
+        
+        # Ensure filename ends with .xlsx
+        if not filename.endswith('.xlsx'):
+            filename += '.xlsx'
+        
+        # Export to Excel
+        excel_file = export_jobs_to_excel(
+            jobs=jobs,
+            resume_tips=resume_tips,
+            include_tips_sheet=include_tips_sheet
+        )
+        
+        # Send file
+        return send_file(
+            excel_file,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=filename
+        )
+    
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'error': f'Export failed: {str(e)}'}), 500
+
+
+@app.route('/api/export/excel/stored-jobs/<user_id>', methods=['GET'])
+def export_stored_jobs_excel(user_id):
+    """
+    Export stored jobs for a user to Excel.
+    
+    Query Parameters:
+        include_tips: true/false (default: true) - Include resume tips if available
+        highlight_filter: red/yellow/white - Filter by highlight category
+        min_score: float - Minimum score filter
+        max_score: float - Maximum score filter
+    
+    Returns:
+        Excel file download
+    """
+    try:
+        # Get query parameters
+        include_tips_param = request.args.get('include_tips', 'true').lower() == 'true'
+        highlight_filter = request.args.get('highlight_filter')
+        min_score = request.args.get('min_score', type=float)
+        max_score = request.args.get('max_score', type=float)
+        
+        # Get storage manager
+        storage = JobStorageManager()
+        
+        # Get jobs
+        if highlight_filter:
+            jobs = storage.get_jobs_by_highlight(user_id, highlight_filter)
+        else:
+            jobs = storage.get_scored_jobs(user_id, min_score, max_score)
+        
+        if not jobs:
+            return jsonify({'error': 'No jobs found for this user'}), 404
+        
+        # Get resume tips if requested and resume exists
+        resume_tips = None
+        if include_tips_param:
+            try:
+                analyzer = get_resume_analyzer()
+                # Try to get optimization tips for user's resume
+                tips_result = analyzer.generate_optimization_tips(
+                    resume_text="",  # Would need to retrieve from storage
+                    target_jobs=jobs[:5]  # Use top 5 jobs
+                )
+                resume_tips = tips_result
+            except Exception as e:
+                print(f"Could not get resume tips: {e}")
+        
+        # Generate filename
+        filename = f'jobs_{user_id}_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx'
+        
+        # Export to Excel
+        excel_file = export_jobs_to_excel(
+            jobs=jobs,
+            resume_tips=resume_tips,
+            include_tips_sheet=include_tips_param and resume_tips is not None
+        )
+        
+        # Send file
+        return send_file(
+            excel_file,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=filename
+        )
+    
+    except Exception as e:
+        return jsonify({'error': f'Export failed: {str(e)}'}), 500
+
+
+@app.route('/api/export/excel/with-resume/<int:resume_id>', methods=['POST'])
+def export_jobs_with_resume_tips(resume_id):
+    """
+    Export jobs to Excel with resume optimization tips.
+    
+    Request JSON:
+    {
+        "jobs": [...],  # List of job dictionaries
+        "include_tips_sheet": true  # Optional
+    }
+    
+    Returns:
+        Excel file download with resume tips included
+    """
+    try:
+        data = request.get_json()
+        
+        if not data or 'jobs' not in data:
+            return jsonify({'error': 'Missing jobs data'}), 400
+        
+        jobs = data['jobs']
+        include_tips_sheet = data.get('include_tips_sheet', True)
+        
+        # Get resume analyzer
+        analyzer = get_resume_analyzer()
+        
+        # Get resume from storage (simplified - would need actual implementation)
+        # For now, generate tips based on jobs
+        resume_tips = analyzer.generate_optimization_tips(
+            resume_text="",  # Would retrieve from storage
+            target_jobs=jobs[:10]  # Use up to 10 jobs for analysis
+        )
+        
+        # Generate filename
+        filename = f'jobs_with_tips_{resume_id}_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx'
+        
+        # Export to Excel
+        excel_file = export_jobs_to_excel(
+            jobs=jobs,
+            resume_tips=resume_tips,
+            include_tips_sheet=include_tips_sheet
+        )
+        
+        # Send file
+        return send_file(
+            excel_file,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=filename
+        )
+    
+    except Exception as e:
+        return jsonify({'error': f'Export failed: {str(e)}'}), 500
+
+
+@app.route('/api/export/excel/quick/<user_id>', methods=['GET'])
+def quick_export_excel(user_id):
+    """
+    Quick export of all scored jobs for a user.
+    
+    Returns:
+        Excel file download without resume tips
+    """
+    try:
+        # Get storage manager
+        storage = JobStorageManager()
+        
+        # Get all scored jobs
+        jobs = storage.get_scored_jobs(user_id)
+        
+        if not jobs:
+            return jsonify({'error': 'No jobs found for this user'}), 404
+        
+        # Generate filename
+        filename = f'jobs_{user_id}_quick_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx'
+        
+        # Export to Excel without tips
+        excel_file = export_jobs_to_excel(
+            jobs=jobs,
+            resume_tips=None,
+            include_tips_sheet=False
+        )
+        
+        # Send file
+        return send_file(
+            excel_file,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=filename
+        )
+    
+    except Exception as e:
+        return jsonify({'error': f'Export failed: {str(e)}'}), 500
+
+
 if __name__ == '__main__':
     # Development server. For production use a WSGI server (gunicorn).
     app.run(host='0.0.0.0', port=5000, debug=True)
-
-# Upload and analyze resume
-with open('resume.pdf', 'rb') as f:
-    r = requests.post('http://localhost:5000/api/resume-upload', files={'resume': f})
-    resume_id = r.json()['resume_id']
-
-# Get analysis
-analysis = requests.get(f'http://localhost:5000/api/analyze-resume/{resume_id}')
-print(analysis.json()['analysis'])
-
-# Compare with job
-comparison = requests.post('http://localhost:5000/api/compare-resume-with-job',
-    json={'resume_id': resume_id, 'job_id': 'job-123'})
-print(f"Match: {comparison.json()['comparison']['weighted_match_score']}%")
-
