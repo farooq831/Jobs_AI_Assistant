@@ -2490,6 +2490,327 @@ def get_missing_keywords_summary(resume_id):
         }), 500
 
 
+# ===================================================================
+# Task 6.3: Generate Optimization Tips
+# ===================================================================
+
+@app.route('/api/optimization-tips', methods=['POST'])
+def generate_optimization_tips():
+    """
+    Task 6.3: Generate comprehensive optimization tips for resume improvement.
+    
+    Request body:
+    {
+        "resume_text": "resume text...",  // Optional if resume_id provided
+        "resume_id": 123,  // Optional if resume_text provided
+        "job_descriptions": ["job desc 1", ...],  // Optional
+        "job_ids": ["job-1", "job-2"],  // Optional - use stored jobs
+        "user_id": 1,  // Optional - use user preferences
+        "format": "frontend"  // Optional: "frontend", "excel", or "full" (default)
+    }
+    
+    Returns optimization tips formatted for frontend display or Excel export.
+    """
+    try:
+        data = request.json or {}
+        
+        # Get resume text
+        resume_text = data.get('resume_text')
+        resume_id = data.get('resume_id')
+        
+        if not resume_text and not resume_id:
+            return jsonify({
+                "success": False,
+                "message": "Either resume_text or resume_id must be provided"
+            }), 400
+        
+        # Get resume text from storage if resume_id provided
+        if resume_id and not resume_text:
+            resume_id = int(resume_id)
+            if resume_id not in resume_store:
+                return jsonify({
+                    "success": False,
+                    "message": f"Resume with ID {resume_id} not found"
+                }), 404
+            resume_text = resume_store[resume_id].get('full_text')
+        
+        # Get job descriptions
+        job_descriptions = data.get('job_descriptions')
+        job_ids = data.get('job_ids')
+        
+        if job_ids and not job_descriptions:
+            # Get jobs from storage
+            job_descriptions = []
+            for job_id in job_ids:
+                job = storage_manager.get_job(job_id)
+                if job and job.get('description'):
+                    job_descriptions.append(job['description'])
+        
+        # Get user preferences
+        user_preferences = None
+        user_id = data.get('user_id')
+        if user_id:
+            user_id = str(user_id)
+            if user_id in user_details_store:
+                user_preferences = user_details_store[user_id]
+        
+        # Generate optimization tips
+        analyzer = get_resume_analyzer()
+        tips = analyzer.generate_optimization_tips(
+            resume_text=resume_text,
+            job_descriptions=job_descriptions,
+            user_preferences=user_preferences
+        )
+        
+        # Format based on requested format
+        output_format = data.get('format', 'full')
+        
+        if output_format == 'frontend':
+            formatted_tips = analyzer.format_tips_for_frontend(tips)
+            return jsonify({
+                "success": True,
+                "tips": formatted_tips,
+                "message": "Optimization tips generated successfully (frontend format)"
+            }), 200
+        
+        elif output_format == 'excel':
+            formatted_tips = analyzer.format_tips_for_excel(tips)
+            return jsonify({
+                "success": True,
+                "tips": formatted_tips,
+                "message": "Optimization tips generated successfully (Excel format)"
+            }), 200
+        
+        else:  # full format
+            return jsonify({
+                "success": True,
+                "tips": tips,
+                "message": "Optimization tips generated successfully"
+            }), 200
+        
+    except ValueError as e:
+        return jsonify({
+            "success": False,
+            "message": f"Validation error: {str(e)}"
+        }), 400
+    except Exception as e:
+        logger.error(f"Error generating optimization tips: {str(e)}")
+        return jsonify({
+            "success": False,
+            "message": f"Error generating optimization tips: {str(e)}"
+        }), 500
+
+
+@app.route('/api/optimization-tips/<int:resume_id>', methods=['GET'])
+def get_optimization_tips_for_resume(resume_id):
+    """
+    Get optimization tips for a specific resume.
+    
+    Query parameters:
+        format: "frontend", "excel", or "full" (default: "frontend")
+        include_jobs: "true" to analyze against all stored jobs (default: "false")
+        user_id: User ID to include user preferences
+    """
+    try:
+        # Validate resume
+        if resume_id not in resume_store:
+            return jsonify({
+                "success": False,
+                "message": f"Resume with ID {resume_id} not found"
+            }), 404
+        
+        resume_text = resume_store[resume_id].get('full_text')
+        
+        # Get query parameters
+        output_format = request.args.get('format', 'frontend')
+        include_jobs = request.args.get('include_jobs', 'false').lower() == 'true'
+        user_id = request.args.get('user_id')
+        
+        # Get job descriptions if requested
+        job_descriptions = None
+        if include_jobs:
+            jobs = storage_manager.get_all_jobs()
+            if jobs:
+                job_descriptions = [job.get('description', '') for job in jobs if job.get('description')]
+        
+        # Get user preferences
+        user_preferences = None
+        if user_id and user_id in user_details_store:
+            user_preferences = user_details_store[user_id]
+        
+        # Generate optimization tips
+        analyzer = get_resume_analyzer()
+        tips = analyzer.generate_optimization_tips(
+            resume_text=resume_text,
+            job_descriptions=job_descriptions,
+            user_preferences=user_preferences
+        )
+        
+        # Format based on requested format
+        if output_format == 'frontend':
+            formatted_tips = analyzer.format_tips_for_frontend(tips)
+            return jsonify({
+                "success": True,
+                "resume_id": resume_id,
+                "tips": formatted_tips,
+                "message": "Optimization tips generated successfully"
+            }), 200
+        
+        elif output_format == 'excel':
+            formatted_tips = analyzer.format_tips_for_excel(tips)
+            return jsonify({
+                "success": True,
+                "resume_id": resume_id,
+                "tips": formatted_tips,
+                "message": "Optimization tips generated successfully (Excel format)"
+            }), 200
+        
+        else:  # full format
+            return jsonify({
+                "success": True,
+                "resume_id": resume_id,
+                "tips": tips,
+                "message": "Optimization tips generated successfully"
+            }), 200
+        
+    except Exception as e:
+        logger.error(f"Error generating optimization tips: {str(e)}")
+        return jsonify({
+            "success": False,
+            "message": f"Error generating optimization tips: {str(e)}"
+        }), 500
+
+
+@app.route('/api/optimization-tips/quick-summary/<int:resume_id>', methods=['GET'])
+def get_quick_optimization_summary(resume_id):
+    """
+    Get a quick optimization summary for a resume.
+    Returns just the score, top 3 action items, and summary.
+    """
+    try:
+        # Validate resume
+        if resume_id not in resume_store:
+            return jsonify({
+                "success": False,
+                "message": f"Resume with ID {resume_id} not found"
+            }), 404
+        
+        resume_text = resume_store[resume_id].get('full_text')
+        
+        # Generate optimization tips
+        analyzer = get_resume_analyzer()
+        tips = analyzer.generate_optimization_tips(resume_text=resume_text)
+        
+        # Create quick summary
+        quick_summary = {
+            "score": tips['overall_assessment']['strength_score'],
+            "score_level": analyzer._get_score_level(tips['overall_assessment']['strength_score']),
+            "summary": tips['summary'],
+            "top_actions": tips['action_items'][:3],
+            "critical_count": len(tips['critical_tips']),
+            "important_count": len(tips['important_tips']),
+            "strengths": tips['overall_assessment']['key_strengths'][:3]
+        }
+        
+        return jsonify({
+            "success": True,
+            "resume_id": resume_id,
+            "quick_summary": quick_summary,
+            "message": "Quick optimization summary generated"
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error generating quick summary: {str(e)}")
+        return jsonify({
+            "success": False,
+            "message": f"Error generating summary: {str(e)}"
+        }), 500
+
+
+@app.route('/api/batch-optimization-tips', methods=['POST'])
+def batch_generate_optimization_tips():
+    """
+    Generate optimization tips for multiple resumes at once.
+    
+    Request body:
+    {
+        "resume_ids": [1, 2, 3],
+        "format": "frontend"  // Optional
+    }
+    """
+    try:
+        data = request.json or {}
+        
+        resume_ids = data.get('resume_ids', [])
+        if not resume_ids:
+            return jsonify({
+                "success": False,
+                "message": "resume_ids array is required"
+            }), 400
+        
+        output_format = data.get('format', 'frontend')
+        analyzer = get_resume_analyzer()
+        
+        results = []
+        
+        for resume_id in resume_ids:
+            try:
+                resume_id = int(resume_id)
+                
+                if resume_id not in resume_store:
+                    results.append({
+                        "resume_id": resume_id,
+                        "success": False,
+                        "error": "Resume not found"
+                    })
+                    continue
+                
+                resume_text = resume_store[resume_id].get('full_text')
+                
+                # Generate tips
+                tips = analyzer.generate_optimization_tips(resume_text=resume_text)
+                
+                # Format based on requested format
+                if output_format == 'frontend':
+                    formatted_tips = analyzer.format_tips_for_frontend(tips)
+                elif output_format == 'excel':
+                    formatted_tips = analyzer.format_tips_for_excel(tips)
+                else:
+                    formatted_tips = tips
+                
+                results.append({
+                    "resume_id": resume_id,
+                    "filename": resume_store[resume_id].get('filename'),
+                    "tips": formatted_tips,
+                    "success": True
+                })
+                
+            except Exception as e:
+                results.append({
+                    "resume_id": resume_id,
+                    "success": False,
+                    "error": str(e)
+                })
+        
+        successful = sum(1 for r in results if r.get('success', False))
+        
+        return jsonify({
+            "success": True,
+            "total_resumes": len(resume_ids),
+            "successful": successful,
+            "failed": len(results) - successful,
+            "results": results,
+            "message": f"Generated optimization tips for {successful} out of {len(resume_ids)} resumes"
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error in batch optimization tips: {str(e)}")
+        return jsonify({
+            "success": False,
+            "message": f"Error generating batch optimization tips: {str(e)}"
+        }), 500
+
+
 if __name__ == '__main__':
     # Development server. For production use a WSGI server (gunicorn).
     app.run(host='0.0.0.0', port=5000, debug=True)
