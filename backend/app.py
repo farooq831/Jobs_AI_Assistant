@@ -17,6 +17,7 @@ from keyword_extractor import get_keyword_extractor
 from job_scorer import get_job_scorer
 from resume_analyzer import get_resume_analyzer
 from excel_exporter import export_jobs_to_excel
+from csv_pdf_exporter import export_jobs_to_csv, export_jobs_to_pdf
 import requests
 
 app = Flask(__name__)
@@ -3023,6 +3024,379 @@ def quick_export_excel(user_id):
         return send_file(
             excel_file,
             mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=filename
+        )
+    
+    except Exception as e:
+        return jsonify({'error': f'Export failed: {str(e)}'}), 500
+
+
+# ===== CSV EXPORT ENDPOINTS =====
+
+@app.route('/api/export/csv', methods=['POST'])
+def export_jobs_csv():
+    """
+    Export jobs to CSV format.
+    
+    Request JSON:
+    {
+        "jobs": [...],           # List of job dictionaries with scores
+        "include_scores": true,  # Optional: include score columns
+        "include_description": true,  # Optional: include description column
+        "filename": "jobs.csv"   # Optional: custom filename
+    }
+    
+    Returns:
+        CSV file download
+    """
+    try:
+        data = request.get_json()
+        
+        if not data or 'jobs' not in data:
+            return jsonify({'error': 'Missing jobs data'}), 400
+        
+        jobs = data['jobs']
+        include_scores = data.get('include_scores', True)
+        include_description = data.get('include_description', True)
+        filename = data.get('filename', f'jobs_export_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv')
+        
+        # Ensure filename ends with .csv
+        if not filename.endswith('.csv'):
+            filename += '.csv'
+        
+        # Export to CSV
+        csv_file = export_jobs_to_csv(
+            jobs=jobs,
+            include_scores=include_scores,
+            include_description=include_description
+        )
+        
+        # Send file
+        return send_file(
+            csv_file,
+            mimetype='text/csv',
+            as_attachment=True,
+            download_name=filename
+        )
+    
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'error': f'Export failed: {str(e)}'}), 500
+
+
+@app.route('/api/export/csv/stored-jobs/<user_id>', methods=['GET'])
+def export_stored_jobs_csv(user_id):
+    """
+    Export stored jobs for a user to CSV.
+    
+    Query Parameters:
+        include_scores: true/false (default: true) - Include score columns
+        include_description: true/false (default: true) - Include description
+        highlight_filter: red/yellow/white - Filter by highlight category
+        min_score: float - Minimum score filter
+        max_score: float - Maximum score filter
+    
+    Returns:
+        CSV file download
+    """
+    try:
+        # Get query parameters
+        include_scores = request.args.get('include_scores', 'true').lower() == 'true'
+        include_description = request.args.get('include_description', 'true').lower() == 'true'
+        highlight_filter = request.args.get('highlight_filter')
+        min_score = request.args.get('min_score', type=float)
+        max_score = request.args.get('max_score', type=float)
+        
+        # Get storage manager
+        storage = JobStorageManager()
+        
+        # Get jobs
+        if highlight_filter:
+            jobs = storage.get_jobs_by_highlight(user_id, highlight_filter)
+        else:
+            jobs = storage.get_scored_jobs(user_id, min_score, max_score)
+        
+        if not jobs:
+            return jsonify({'error': 'No jobs found for this user'}), 404
+        
+        # Generate filename
+        filename = f'jobs_{user_id}_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
+        
+        # Export to CSV
+        csv_file = export_jobs_to_csv(
+            jobs=jobs,
+            include_scores=include_scores,
+            include_description=include_description
+        )
+        
+        # Send file
+        return send_file(
+            csv_file,
+            mimetype='text/csv',
+            as_attachment=True,
+            download_name=filename
+        )
+    
+    except Exception as e:
+        return jsonify({'error': f'Export failed: {str(e)}'}), 500
+
+
+@app.route('/api/export/csv/quick/<user_id>', methods=['GET'])
+def quick_export_csv(user_id):
+    """
+    Quick export of all scored jobs for a user to CSV.
+    
+    Returns:
+        CSV file download
+    """
+    try:
+        # Get storage manager
+        storage = JobStorageManager()
+        
+        # Get all scored jobs
+        jobs = storage.get_scored_jobs(user_id)
+        
+        if not jobs:
+            return jsonify({'error': 'No jobs found for this user'}), 404
+        
+        # Generate filename
+        filename = f'jobs_{user_id}_quick_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
+        
+        # Export to CSV
+        csv_file = export_jobs_to_csv(
+            jobs=jobs,
+            include_scores=True,
+            include_description=True
+        )
+        
+        # Send file
+        return send_file(
+            csv_file,
+            mimetype='text/csv',
+            as_attachment=True,
+            download_name=filename
+        )
+    
+    except Exception as e:
+        return jsonify({'error': f'Export failed: {str(e)}'}), 500
+
+
+# ===== PDF EXPORT ENDPOINTS =====
+
+@app.route('/api/export/pdf', methods=['POST'])
+def export_jobs_pdf():
+    """
+    Export jobs to PDF format with formatting.
+    
+    Request JSON:
+    {
+        "jobs": [...],           # List of job dictionaries with scores
+        "resume_tips": {...},    # Optional: resume optimization tips
+        "include_tips": true,    # Optional: include tips section
+        "filename": "jobs.pdf"   # Optional: custom filename
+    }
+    
+    Returns:
+        PDF file download
+    """
+    try:
+        data = request.get_json()
+        
+        if not data or 'jobs' not in data:
+            return jsonify({'error': 'Missing jobs data'}), 400
+        
+        jobs = data['jobs']
+        resume_tips = data.get('resume_tips')
+        include_tips = data.get('include_tips', True)
+        filename = data.get('filename', f'jobs_export_{datetime.now().strftime("%Y%m%d_%H%M%S")}.pdf')
+        
+        # Ensure filename ends with .pdf
+        if not filename.endswith('.pdf'):
+            filename += '.pdf'
+        
+        # Export to PDF
+        pdf_file = export_jobs_to_pdf(
+            jobs=jobs,
+            resume_tips=resume_tips,
+            include_tips=include_tips
+        )
+        
+        # Send file
+        return send_file(
+            pdf_file,
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=filename
+        )
+    
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'error': f'Export failed: {str(e)}'}), 500
+
+
+@app.route('/api/export/pdf/stored-jobs/<user_id>', methods=['GET'])
+def export_stored_jobs_pdf(user_id):
+    """
+    Export stored jobs for a user to PDF.
+    
+    Query Parameters:
+        include_tips: true/false (default: true) - Include resume tips if available
+        highlight_filter: red/yellow/white - Filter by highlight category
+        min_score: float - Minimum score filter
+        max_score: float - Maximum score filter
+    
+    Returns:
+        PDF file download
+    """
+    try:
+        # Get query parameters
+        include_tips_param = request.args.get('include_tips', 'true').lower() == 'true'
+        highlight_filter = request.args.get('highlight_filter')
+        min_score = request.args.get('min_score', type=float)
+        max_score = request.args.get('max_score', type=float)
+        
+        # Get storage manager
+        storage = JobStorageManager()
+        
+        # Get jobs
+        if highlight_filter:
+            jobs = storage.get_jobs_by_highlight(user_id, highlight_filter)
+        else:
+            jobs = storage.get_scored_jobs(user_id, min_score, max_score)
+        
+        if not jobs:
+            return jsonify({'error': 'No jobs found for this user'}), 404
+        
+        # Get resume tips if requested
+        resume_tips = None
+        if include_tips_param:
+            # For now, we won't include tips unless explicitly provided
+            # This could be extended to fetch from resume storage
+            pass
+        
+        # Generate filename
+        filename = f'jobs_{user_id}_{datetime.now().strftime("%Y%m%d_%H%M%S")}.pdf'
+        
+        # Export to PDF
+        pdf_file = export_jobs_to_pdf(
+            jobs=jobs,
+            resume_tips=resume_tips,
+            include_tips=include_tips_param
+        )
+        
+        # Send file
+        return send_file(
+            pdf_file,
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=filename
+        )
+    
+    except Exception as e:
+        return jsonify({'error': f'Export failed: {str(e)}'}), 500
+
+
+@app.route('/api/export/pdf/with-resume/<resume_id>', methods=['POST'])
+def export_jobs_pdf_with_resume(resume_id):
+    """
+    Export jobs to PDF with resume-specific optimization tips.
+    
+    Request JSON:
+    {
+        "jobs": [...],           # List of job dictionaries
+        "job_descriptions": [...], # Optional: job descriptions for keyword analysis
+        "include_tips": true     # Optional: include tips section
+    }
+    
+    Returns:
+        PDF file download with personalized tips
+    """
+    try:
+        data = request.get_json()
+        
+        if not data or 'jobs' not in data:
+            return jsonify({'error': 'Missing jobs data'}), 400
+        
+        jobs = data['jobs']
+        job_descriptions = data.get('job_descriptions', [])
+        include_tips = data.get('include_tips', True)
+        
+        # Get resume from storage
+        if resume_id not in resume_store:
+            return jsonify({'error': 'Resume not found'}), 404
+        
+        resume_data = resume_store[resume_id]
+        resume_text = resume_data.get('full_text', '')
+        
+        # Generate optimization tips
+        resume_tips = None
+        if include_tips and resume_text:
+            analyzer = get_resume_analyzer()
+            tips_result = analyzer.generate_optimization_tips(
+                resume_text=resume_text,
+                job_descriptions=job_descriptions
+            )
+            
+            if tips_result['success']:
+                resume_tips = tips_result['tips']
+        
+        # Generate filename
+        filename = f'jobs_with_resume_{resume_id}_{datetime.now().strftime("%Y%m%d_%H%M%S")}.pdf'
+        
+        # Export to PDF
+        pdf_file = export_jobs_to_pdf(
+            jobs=jobs,
+            resume_tips=resume_tips,
+            include_tips=include_tips
+        )
+        
+        # Send file
+        return send_file(
+            pdf_file,
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=filename
+        )
+    
+    except Exception as e:
+        return jsonify({'error': f'Export failed: {str(e)}'}), 500
+
+
+@app.route('/api/export/pdf/quick/<user_id>', methods=['GET'])
+def quick_export_pdf(user_id):
+    """
+    Quick export of all scored jobs for a user to PDF.
+    
+    Returns:
+        PDF file download without resume tips
+    """
+    try:
+        # Get storage manager
+        storage = JobStorageManager()
+        
+        # Get all scored jobs
+        jobs = storage.get_scored_jobs(user_id)
+        
+        if not jobs:
+            return jsonify({'error': 'No jobs found for this user'}), 404
+        
+        # Generate filename
+        filename = f'jobs_{user_id}_quick_{datetime.now().strftime("%Y%m%d_%H%M%S")}.pdf'
+        
+        # Export to PDF without tips
+        pdf_file = export_jobs_to_pdf(
+            jobs=jobs,
+            resume_tips=None,
+            include_tips=False
+        )
+        
+        # Send file
+        return send_file(
+            pdf_file,
+            mimetype='application/pdf',
             as_attachment=True,
             download_name=filename
         )
