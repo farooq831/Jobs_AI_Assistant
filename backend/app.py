@@ -13,6 +13,7 @@ from scrapers.glassdoor_selenium_scraper import GlassdoorSeleniumScraper
 from storage_manager import JobStorageManager
 from data_processor import DataProcessor, clean_job_data, filter_jobs
 from keyword_extractor import get_keyword_extractor
+from job_scorer import get_job_scorer
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for frontend communication
@@ -1425,6 +1426,361 @@ def batch_extract_job_keywords():
         return jsonify({
             "success": False,
             "message": f"Error batch extracting keywords: {str(e)}"
+        }), 500
+
+
+@app.route('/api/score-job', methods=['POST'])
+def score_single_job():
+    """
+    Score a single job against user preferences.
+    
+    Expected JSON:
+    {
+        "job": {...},  // Job data
+        "user_preferences": {...},  // User preferences (location, salary_min/max, job_titles, job_types)
+        "resume_keywords": {...}  // Optional: pre-extracted resume keywords
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                "success": False,
+                "message": "No data provided"
+            }), 400
+        
+        job = data.get('job')
+        user_preferences = data.get('user_preferences')
+        resume_keywords = data.get('resume_keywords')
+        
+        if not job:
+            return jsonify({
+                "success": False,
+                "message": "Job data is required"
+            }), 400
+        
+        if not user_preferences:
+            return jsonify({
+                "success": False,
+                "message": "User preferences are required"
+            }), 400
+        
+        # Get job scorer
+        scorer = get_job_scorer()
+        
+        # Score the job
+        score_result = scorer.score_job(job, user_preferences, resume_keywords)
+        
+        return jsonify({
+            "success": True,
+            "score": score_result,
+            "message": "Job scored successfully"
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Error scoring job: {str(e)}"
+        }), 500
+
+
+@app.route('/api/score-jobs', methods=['POST'])
+def score_multiple_jobs():
+    """
+    Score multiple jobs against user preferences.
+    
+    Expected JSON:
+    {
+        "jobs": [...],  // Array of job data
+        "user_preferences": {...},  // User preferences
+        "resume_keywords": {...},  // Optional: pre-extracted resume keywords
+        "save_to_storage": true  // Optional: save scores to storage (default: false)
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                "success": False,
+                "message": "No data provided"
+            }), 400
+        
+        jobs = data.get('jobs', [])
+        user_preferences = data.get('user_preferences')
+        resume_keywords = data.get('resume_keywords')
+        save_to_storage = data.get('save_to_storage', False)
+        
+        if not jobs:
+            return jsonify({
+                "success": False,
+                "message": "Jobs array is required"
+            }), 400
+        
+        if not user_preferences:
+            return jsonify({
+                "success": False,
+                "message": "User preferences are required"
+            }), 400
+        
+        # Get job scorer
+        scorer = get_job_scorer()
+        
+        # Score all jobs
+        scored_jobs = scorer.score_jobs(jobs, user_preferences, resume_keywords)
+        
+        # Optionally save scores to storage
+        if save_to_storage:
+            storage = JobStorageManager()
+            job_scores = {job['id']: job['score'] for job in scored_jobs if 'id' in job and 'score' in job}
+            update_result = storage.update_jobs_scores(job_scores)
+            
+            return jsonify({
+                "success": True,
+                "scored_jobs": scored_jobs,
+                "storage_update": update_result,
+                "message": f"Scored {len(scored_jobs)} jobs and updated storage"
+            }), 200
+        
+        return jsonify({
+            "success": True,
+            "scored_jobs": scored_jobs,
+            "message": f"Scored {len(scored_jobs)} jobs successfully"
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Error scoring jobs: {str(e)}"
+        }), 500
+
+
+@app.route('/api/score-stored-jobs/<user_id>', methods=['POST'])
+def score_stored_jobs(user_id):
+    """
+    Score all stored jobs for a specific user.
+    
+    Expected JSON:
+    {
+        "filters": {...},  // Optional: filters to apply before scoring
+        "resume_id": "resume-123"  // Optional: resume ID for keyword extraction
+    }
+    
+    Retrieves user preferences from storage and scores all matching jobs.
+    """
+    try:
+        data = request.get_json() or {}
+        
+        # Get user preferences
+        if user_id not in user_details_store:
+            return jsonify({
+                "success": False,
+                "message": f"User {user_id} not found"
+            }), 404
+        
+        user_preferences = user_details_store[user_id]
+        
+        # Get resume keywords if resume_id provided
+        resume_keywords = None
+        resume_id = data.get('resume_id')
+        if resume_id and resume_id in resume_store:
+            extractor = get_keyword_extractor()
+            resume_text = resume_store[resume_id].get('extracted_text', '')
+            if resume_text:
+                resume_keywords = extractor.extract_resume_keywords(resume_text)
+        
+        # Get jobs from storage
+        storage = JobStorageManager()
+        filters = data.get('filters')
+        jobs = storage.get_all_jobs(filters)
+        
+        if not jobs:
+            return jsonify({
+                "success": False,
+                "message": "No jobs found in storage"
+            }), 404
+        
+        # Get job scorer
+        scorer = get_job_scorer()
+        
+        # Score all jobs
+        scored_jobs = scorer.score_jobs(jobs, user_preferences, resume_keywords)
+        
+        # Save scores to storage
+        job_scores = {job['id']: job['score'] for job in scored_jobs if 'id' in job and 'score' in job}
+        update_result = storage.update_jobs_scores(job_scores)
+        
+        # Calculate statistics
+        stats = scorer.calculate_statistics(scored_jobs)
+        
+        return jsonify({
+            "success": True,
+            "user_id": user_id,
+            "total_jobs": len(scored_jobs),
+            "scored_jobs": scored_jobs,
+            "storage_update": update_result,
+            "statistics": stats,
+            "message": f"Scored {len(scored_jobs)} jobs for user {user_id}"
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Error scoring stored jobs: {str(e)}"
+        }), 500
+
+
+@app.route('/api/score-thresholds', methods=['GET'])
+def get_score_thresholds():
+    """
+    Get the current scoring thresholds for color highlighting.
+    """
+    try:
+        scorer = get_job_scorer()
+        
+        return jsonify({
+            "success": True,
+            "thresholds": {
+                "red": scorer.THRESHOLD_RED,
+                "yellow": scorer.THRESHOLD_YELLOW,
+                "white": 100  # Above yellow threshold
+            },
+            "description": {
+                "red": f"Score < {scorer.THRESHOLD_RED}% - Poor match",
+                "yellow": f"{scorer.THRESHOLD_RED}% <= Score < {scorer.THRESHOLD_YELLOW}% - Fair match",
+                "white": f"Score >= {scorer.THRESHOLD_YELLOW}% - Good match"
+            },
+            "message": "Score thresholds retrieved successfully"
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Error getting score thresholds: {str(e)}"
+        }), 500
+
+
+@app.route('/api/update-weights', methods=['POST'])
+def update_scoring_weights():
+    """
+    Update the scoring weights for the job scorer.
+    
+    Expected JSON:
+    {
+        "weights": {
+            "keyword_match": 0.5,
+            "salary_match": 0.25,
+            "location_match": 0.15,
+            "job_type_match": 0.1
+        }
+    }
+    
+    Weights must sum to 1.0.
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                "success": False,
+                "message": "No data provided"
+            }), 400
+        
+        weights = data.get('weights')
+        
+        if not weights:
+            return jsonify({
+                "success": False,
+                "message": "Weights are required"
+            }), 400
+        
+        # Validate weights sum to 1.0
+        total = sum(weights.values())
+        if not (0.99 <= total <= 1.01):
+            return jsonify({
+                "success": False,
+                "message": f"Weights must sum to 1.0, got {total}"
+            }), 400
+        
+        # Create new scorer with updated weights
+        scorer = get_job_scorer(weights=weights)
+        
+        return jsonify({
+            "success": True,
+            "weights": scorer.weights,
+            "message": "Scoring weights updated successfully"
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Error updating weights: {str(e)}"
+        }), 500
+
+
+@app.route('/api/jobs-by-highlight/<highlight>', methods=['GET'])
+def get_jobs_by_highlight(highlight):
+    """
+    Get all jobs with a specific highlight color.
+    
+    Parameters:
+        highlight: 'red', 'yellow', or 'white'
+    """
+    try:
+        if highlight not in ['red', 'yellow', 'white']:
+            return jsonify({
+                "success": False,
+                "message": "Invalid highlight. Must be 'red', 'yellow', or 'white'"
+            }), 400
+        
+        storage = JobStorageManager()
+        jobs = storage.get_jobs_by_highlight(highlight)
+        
+        return jsonify({
+            "success": True,
+            "highlight": highlight,
+            "total_jobs": len(jobs),
+            "jobs": jobs,
+            "message": f"Found {len(jobs)} jobs with {highlight} highlight"
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Error getting jobs by highlight: {str(e)}"
+        }), 500
+
+
+@app.route('/api/jobs-by-score', methods=['GET'])
+def get_jobs_by_score():
+    """
+    Get jobs filtered by score range.
+    
+    Query parameters:
+        min_score: Minimum score (optional)
+        max_score: Maximum score (optional)
+    """
+    try:
+        min_score = request.args.get('min_score', type=float)
+        max_score = request.args.get('max_score', type=float)
+        
+        storage = JobStorageManager()
+        jobs = storage.get_scored_jobs(min_score, max_score)
+        
+        return jsonify({
+            "success": True,
+            "min_score": min_score,
+            "max_score": max_score,
+            "total_jobs": len(jobs),
+            "jobs": jobs,
+            "message": f"Found {len(jobs)} jobs in score range"
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Error getting jobs by score: {str(e)}"
         }), 500
 
 
