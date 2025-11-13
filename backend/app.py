@@ -2228,6 +2228,268 @@ def generate_resume_job_match_report():
         }), 500
 
 
+# ===================================================================
+# Task 6.2: Analyze Job Keywords - Missing Keyword Analysis
+# ===================================================================
+
+@app.route('/api/analyze-job-keywords', methods=['POST'])
+def analyze_job_keywords():
+    """
+    Task 6.2: Analyze high-frequency keywords across multiple job postings
+    and identify which ones are missing from the resume.
+    
+    Request body:
+    {
+        "job_descriptions": ["job desc 1", "job desc 2", ...],  // Required
+        "resume_text": "resume text...",  // Optional if resume_id provided
+        "resume_id": 123,  // Optional if resume_text provided
+        "top_n": 30  // Optional, default 30
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "analysis": {
+            "analysis_summary": {...},
+            "high_frequency_keywords": {...},
+            "missing_keywords": {...},
+            "recommendations": [...]
+        }
+    }
+    """
+    try:
+        data = request.json
+        
+        if not data:
+            return jsonify({
+                "success": False,
+                "message": "No data provided"
+            }), 400
+        
+        job_descriptions = data.get('job_descriptions', [])
+        resume_text = data.get('resume_text')
+        resume_id = data.get('resume_id')
+        top_n = data.get('top_n', 30)
+        
+        # Validate inputs
+        if not job_descriptions:
+            return jsonify({
+                "success": False,
+                "message": "At least one job description is required"
+            }), 400
+        
+        if not isinstance(job_descriptions, list):
+            return jsonify({
+                "success": False,
+                "message": "job_descriptions must be an array of strings"
+            }), 400
+        
+        if not resume_text and not resume_id:
+            return jsonify({
+                "success": False,
+                "message": "Either resume_text or resume_id must be provided"
+            }), 400
+        
+        # Get resume text if resume_id provided
+        if resume_id and not resume_text:
+            resume_id = int(resume_id)
+            if resume_id not in resume_store:
+                return jsonify({
+                    "success": False,
+                    "message": f"Resume with ID {resume_id} not found"
+                }), 404
+            resume_text = resume_store[resume_id].get('full_text')
+        
+        # Analyze job keywords
+        analyzer = get_resume_analyzer()
+        analysis = analyzer.analyze_job_keywords(
+            job_descriptions=job_descriptions,
+            resume_text=resume_text,
+            top_n=top_n
+        )
+        
+        return jsonify({
+            "success": True,
+            "analysis": analysis,
+            "message": f"Analyzed {len(job_descriptions)} job postings successfully"
+        }), 200
+        
+    except ValueError as e:
+        return jsonify({
+            "success": False,
+            "message": f"Validation error: {str(e)}"
+        }), 400
+    except Exception as e:
+        logger.error(f"Error analyzing job keywords: {str(e)}")
+        return jsonify({
+            "success": False,
+            "message": f"Error analyzing job keywords: {str(e)}"
+        }), 500
+
+
+@app.route('/api/analyze-job-keywords/stored-jobs', methods=['POST'])
+def analyze_keywords_from_stored_jobs():
+    """
+    Analyze job keywords from stored jobs for a specific resume.
+    
+    Request body:
+    {
+        "resume_id": 123,  // Required
+        "job_ids": ["job-1", "job-2", ...],  // Optional, analyzes all stored jobs if not provided
+        "top_n": 30  // Optional, default 30
+    }
+    
+    Returns: Same as /api/analyze-job-keywords
+    """
+    try:
+        data = request.json
+        
+        if not data:
+            return jsonify({
+                "success": False,
+                "message": "No data provided"
+            }), 400
+        
+        resume_id = data.get('resume_id')
+        job_ids = data.get('job_ids')
+        top_n = data.get('top_n', 30)
+        
+        # Validate resume_id
+        if not resume_id:
+            return jsonify({
+                "success": False,
+                "message": "resume_id is required"
+            }), 400
+        
+        resume_id = int(resume_id)
+        if resume_id not in resume_store:
+            return jsonify({
+                "success": False,
+                "message": f"Resume with ID {resume_id} not found"
+            }), 404
+        
+        resume_text = resume_store[resume_id].get('full_text')
+        
+        # Get jobs
+        if job_ids:
+            jobs = []
+            for job_id in job_ids:
+                job = storage_manager.get_job(job_id)
+                if job:
+                    jobs.append(job)
+        else:
+            # Get all stored jobs
+            jobs = storage_manager.get_all_jobs()
+        
+        if not jobs:
+            return jsonify({
+                "success": False,
+                "message": "No jobs found to analyze"
+            }), 404
+        
+        # Extract job descriptions
+        job_descriptions = [job.get('description', '') for job in jobs if job.get('description')]
+        
+        if not job_descriptions:
+            return jsonify({
+                "success": False,
+                "message": "No job descriptions found in stored jobs"
+            }), 400
+        
+        # Analyze job keywords
+        analyzer = get_resume_analyzer()
+        analysis = analyzer.analyze_job_keywords(
+            job_descriptions=job_descriptions,
+            resume_text=resume_text,
+            top_n=top_n
+        )
+        
+        return jsonify({
+            "success": True,
+            "resume_id": resume_id,
+            "jobs_analyzed": len(job_descriptions),
+            "analysis": analysis,
+            "message": f"Analyzed {len(job_descriptions)} stored job postings successfully"
+        }), 200
+        
+    except ValueError as e:
+        return jsonify({
+            "success": False,
+            "message": f"Validation error: {str(e)}"
+        }), 400
+    except Exception as e:
+        logger.error(f"Error analyzing stored jobs keywords: {str(e)}")
+        return jsonify({
+            "success": False,
+            "message": f"Error analyzing stored jobs keywords: {str(e)}"
+        }), 500
+
+
+@app.route('/api/missing-keywords-summary/<int:resume_id>', methods=['GET'])
+def get_missing_keywords_summary(resume_id):
+    """
+    Get a quick summary of missing keywords for a resume against all stored jobs.
+    
+    Returns: Simplified view focused on critical missing keywords
+    """
+    try:
+        # Validate resume
+        if resume_id not in resume_store:
+            return jsonify({
+                "success": False,
+                "message": f"Resume with ID {resume_id} not found"
+            }), 404
+        
+        resume_text = resume_store[resume_id].get('full_text')
+        
+        # Get all stored jobs
+        jobs = storage_manager.get_all_jobs()
+        
+        if not jobs:
+            return jsonify({
+                "success": False,
+                "message": "No jobs found to analyze"
+            }), 404
+        
+        # Extract job descriptions
+        job_descriptions = [job.get('description', '') for job in jobs if job.get('description')]
+        
+        # Analyze job keywords
+        analyzer = get_resume_analyzer()
+        analysis = analyzer.analyze_job_keywords(
+            job_descriptions=job_descriptions,
+            resume_text=resume_text,
+            top_n=20
+        )
+        
+        # Create simplified summary
+        missing = analysis['missing_keywords']
+        summary = {
+            "critical_technical_skills": [k['keyword'] for k in missing['critical_technical']],
+            "important_technical_skills": [k['keyword'] for k in missing['important_technical']],
+            "critical_soft_skills": [k['keyword'] for k in missing['critical_soft_skills']],
+            "important_soft_skills": [k['keyword'] for k in missing['important_soft_skills']],
+            "technical_coverage": analysis['analysis_summary']['technical_coverage_percentage'],
+            "soft_skills_coverage": analysis['analysis_summary']['soft_skills_coverage_percentage'],
+            "top_recommendations": analysis['recommendations'][:5]
+        }
+        
+        return jsonify({
+            "success": True,
+            "resume_id": resume_id,
+            "jobs_analyzed": len(job_descriptions),
+            "summary": summary,
+            "message": "Missing keywords summary generated successfully"
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error generating missing keywords summary: {str(e)}")
+        return jsonify({
+            "success": False,
+            "message": f"Error generating summary: {str(e)}"
+        }), 500
+
+
 if __name__ == '__main__':
     # Development server. For production use a WSGI server (gunicorn).
     app.run(host='0.0.0.0', port=5000, debug=True)
@@ -2245,3 +2507,4 @@ print(analysis.json()['analysis'])
 comparison = requests.post('http://localhost:5000/api/compare-resume-with-job',
     json={'resume_id': resume_id, 'job_id': 'job-123'})
 print(f"Match: {comparison.json()['comparison']['weighted_match_score']}%")
+
