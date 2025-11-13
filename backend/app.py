@@ -14,6 +14,8 @@ from storage_manager import JobStorageManager
 from data_processor import DataProcessor, clean_job_data, filter_jobs
 from keyword_extractor import get_keyword_extractor
 from job_scorer import get_job_scorer
+from resume_analyzer import get_resume_analyzer
+import requests
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for frontend communication
@@ -345,7 +347,7 @@ def get_resume(resume_id):
         return jsonify({
             "success": True,
             "data": resume_data
-        }), 200
+        }, 200)
     else:
         return jsonify({
             "success": False,
@@ -1784,6 +1786,462 @@ def get_jobs_by_score():
         }), 500
 
 
+# ============================================================================
+# RESUME ANALYSIS ENDPOINTS (Task 6.1)
+# ============================================================================
+
+@app.route('/api/analyze-resume', methods=['POST'])
+def analyze_resume():
+    """
+    Analyze resume text and extract comprehensive information.
+    
+    Expected JSON:
+    {
+        "resume_text": "Resume content...",
+        "resume_id": "optional-resume-id",
+        "top_n": 50  // Optional: number of keywords to extract
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                "success": False,
+                "message": "No data provided"
+            }), 400
+        
+        resume_text = data.get('resume_text', '')
+        top_n = data.get('top_n', 50)
+        
+        if not resume_text or len(resume_text.strip()) < 50:
+            return jsonify({
+                "success": False,
+                "message": "Resume text must be at least 50 characters"
+            }), 400
+        
+        # Get resume analyzer
+        analyzer = get_resume_analyzer()
+        
+        # Analyze resume
+        analysis = analyzer.extract_resume_keywords(resume_text, top_n=top_n)
+        
+        return jsonify({
+            "success": True,
+            "resume_id": data.get('resume_id'),
+            "analysis": analysis,
+            "message": "Resume analyzed successfully"
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Error analyzing resume: {str(e)}"
+        }), 500
+
+
+@app.route('/api/analyze-resume/<int:resume_id>', methods=['GET'])
+def analyze_stored_resume(resume_id):
+    """
+    Analyze a previously uploaded resume from storage.
+    
+    Query parameters:
+        top_n: Number of keywords to extract (default: 50)
+    """
+    try:
+        # Get resume from storage
+        if resume_id not in resume_store:
+            return jsonify({
+                "success": False,
+                "message": "Resume not found"
+            }), 404
+        
+        resume_data = resume_store[resume_id]
+        resume_text = resume_data.get('extracted_text', '')
+        
+        if not resume_text:
+            return jsonify({
+                "success": False,
+                "message": "No text available for this resume"
+            }), 400
+        
+        top_n = request.args.get('top_n', type=int, default=50)
+        
+        # Get resume analyzer
+        analyzer = get_resume_analyzer()
+        
+        # Analyze resume
+        analysis = analyzer.extract_resume_keywords(resume_text, top_n=top_n)
+        
+        return jsonify({
+            "success": True,
+            "resume_id": resume_id,
+            "filename": resume_data.get('filename'),
+            "analysis": analysis,
+            "message": "Resume analyzed successfully"
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Error analyzing resume: {str(e)}"
+        }), 500
+
+
+@app.route('/api/extract-skills-from-list', methods=['POST'])
+def extract_skills_from_list():
+    """
+    Extract and categorize skills from a direct list input.
+    
+    Expected JSON:
+    {
+        "skills": ["Python", "JavaScript", "Leadership", "Machine Learning", ...]
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                "success": False,
+                "message": "No data provided"
+            }), 400
+        
+        skills_list = data.get('skills', [])
+        
+        if not skills_list or not isinstance(skills_list, list):
+            return jsonify({
+                "success": False,
+                "message": "Skills must be provided as a non-empty list"
+            }), 400
+        
+        # Get resume analyzer
+        analyzer = get_resume_analyzer()
+        
+        # Extract and categorize skills
+        categorized = analyzer.extract_skills_from_list(skills_list)
+        
+        return jsonify({
+            "success": True,
+            "categorized_skills": categorized,
+            "message": "Skills extracted and categorized successfully"
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Error extracting skills: {str(e)}"
+        }), 500
+
+
+@app.route('/api/compare-resume-with-job', methods=['POST'])
+def compare_resume_with_job():
+    """
+    Compare resume with job posting and get recommendations.
+    
+    Expected JSON:
+    {
+        "resume_keywords": {...},  // From analyze-resume endpoint
+        "job_keywords": {...},  // From extract-keywords/job endpoint
+        "resume_id": "optional-resume-id",
+        "job_id": "optional-job-id"
+    }
+    
+    OR
+    
+    {
+        "resume_id": 123,  // ID from resume storage
+        "job_id": "job-uuid"  // ID from job storage
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                "success": False,
+                "message": "No data provided"
+            }), 400
+        
+        analyzer = get_resume_analyzer()
+        extractor = get_keyword_extractor()
+        
+        # Option 1: Direct keyword objects provided
+        if 'resume_keywords' in data and 'job_keywords' in data:
+            resume_keywords = data['resume_keywords']
+            job_keywords = data['job_keywords']
+        
+        # Option 2: Extract from stored resume and job
+        elif 'resume_id' in data and 'job_id' in data:
+            resume_id = data['resume_id']
+            job_id = data['job_id']
+            
+            # Get resume from storage
+            if resume_id not in resume_store:
+                return jsonify({
+                    "success": False,
+                    "message": f"Resume {resume_id} not found"
+                }), 404
+            
+            resume_text = resume_store[resume_id].get('extracted_text', '')
+            
+            # Get job from storage
+            storage = JobStorageManager()
+            job = storage.get_job_by_id(job_id)
+            
+            if not job:
+                return jsonify({
+                    "success": False,
+                    "message": f"Job {job_id} not found"
+                }), 404
+            
+            # Extract keywords
+            resume_keywords = analyzer.extract_resume_keywords(resume_text)
+            job_keywords = extractor.extract_job_keywords(job)
+        
+        else:
+            return jsonify({
+                "success": False,
+                "message": "Either provide resume_keywords and job_keywords, or resume_id and job_id"
+            }), 400
+        
+        # Compare resume with job
+        comparison = analyzer.compare_resume_with_job(resume_keywords, job_keywords)
+        
+        return jsonify({
+            "success": True,
+            "comparison": comparison,
+            "message": "Resume and job compared successfully"
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Error comparing resume with job: {str(e)}"
+        }), 500
+
+
+@app.route('/api/get-skill-categories', methods=['GET'])
+def get_skill_categories():
+    """
+    Get available skill categories for reference.
+    
+    Returns examples of technical and soft skills.
+    """
+    try:
+        analyzer = get_resume_analyzer()
+        categories = analyzer.get_skill_categories()
+        
+        return jsonify({
+            "success": True,
+            "skill_categories": categories,
+            "message": "Skill categories retrieved successfully"
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Error getting skill categories: {str(e)}"
+        }), 500
+
+
+@app.route('/api/batch-analyze-resumes', methods=['POST'])
+def batch_analyze_resumes():
+    """
+    Analyze multiple resumes at once.
+    
+    Expected JSON:
+    {
+        "resume_ids": [1, 2, 3, ...]  // List of resume IDs from storage
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                "success": False,
+                "message": "No data provided"
+            }), 400
+        
+        resume_ids = data.get('resume_ids', [])
+        
+        if not resume_ids or not isinstance(resume_ids, list):
+            return jsonify({
+                "success": False,
+                "message": "resume_ids must be provided as a non-empty list"
+            }), 400
+        
+        analyzer = get_resume_analyzer()
+        results = []
+        
+        for resume_id in resume_ids:
+            try:
+                if resume_id not in resume_store:
+                    results.append({
+                        "resume_id": resume_id,
+                        "success": False,
+                        "error": "Resume not found"
+                    })
+                    continue
+                
+                resume_data = resume_store[resume_id]
+                resume_text = resume_data.get('extracted_text', '')
+                
+                analysis = analyzer.extract_resume_keywords(resume_text)
+                
+                results.append({
+                    "resume_id": resume_id,
+                    "filename": resume_data.get('filename'),
+                    "analysis": analysis,
+                    "success": True
+                })
+                
+            except Exception as e:
+                results.append({
+                    "resume_id": resume_id,
+                    "success": False,
+                    "error": str(e)
+                })
+        
+        successful = sum(1 for r in results if r.get('success', False))
+        
+        return jsonify({
+            "success": True,
+            "total_resumes": len(resume_ids),
+            "successful": successful,
+            "failed": len(results) - successful,
+            "results": results,
+            "message": f"Analyzed {successful} out of {len(resume_ids)} resumes"
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Error batch analyzing resumes: {str(e)}"
+        }), 500
+
+
+@app.route('/api/resume-job-match-report', methods=['POST'])
+def generate_resume_job_match_report():
+    """
+    Generate a comprehensive match report between a resume and multiple jobs.
+    
+    Expected JSON:
+    {
+        "resume_id": 123,
+        "job_ids": ["job-1", "job-2", ...],  // Optional: specific jobs, or all jobs if not provided
+        "min_score": 40  // Optional: minimum match score to include
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                "success": False,
+                "message": "No data provided"
+            }), 400
+        
+        resume_id = data.get('resume_id')
+        job_ids = data.get('job_ids', [])
+        min_score = data.get('min_score', 0)
+        
+        if not resume_id:
+            return jsonify({
+                "success": False,
+                "message": "resume_id is required"
+            }), 400
+        
+        # Get resume from storage
+        if resume_id not in resume_store:
+            return jsonify({
+                "success": False,
+                "message": f"Resume {resume_id} not found"
+            }), 404
+        
+        resume_text = resume_store[resume_id].get('extracted_text', '')
+        
+        # Get jobs from storage
+        storage = JobStorageManager()
+        
+        if job_ids:
+            jobs = [storage.get_job_by_id(job_id) for job_id in job_ids]
+            jobs = [j for j in jobs if j is not None]
+        else:
+            jobs = storage.get_all_jobs()
+        
+        if not jobs:
+            return jsonify({
+                "success": False,
+                "message": "No jobs found"
+            }), 404
+        
+        # Analyze resume
+        analyzer = get_resume_analyzer()
+        extractor = get_keyword_extractor()
+        
+        resume_keywords = analyzer.extract_resume_keywords(resume_text)
+        
+        # Compare with each job
+        match_reports = []
+        
+        for job in jobs:
+            try:
+                job_keywords = extractor.extract_job_keywords(job)
+                comparison = analyzer.compare_resume_with_job(resume_keywords, job_keywords)
+                
+                match_score = comparison['weighted_match_score']
+                
+                if match_score >= min_score:
+                    match_reports.append({
+                        "job_id": job.get('id'),
+                        "job_title": job.get('title'),
+                        "company": job.get('company'),
+                        "location": job.get('location'),
+                        "match_score": match_score,
+                        "match_level": comparison['match_level'],
+                        "technical_match": comparison['match_result']['technical_match']['match_percentage'],
+                        "soft_skills_match": comparison['match_result']['soft_skills_match']['match_percentage'],
+                        "recommendations": comparison['recommendations']
+                    })
+            except Exception as e:
+                logger.error(f"Error comparing with job {job.get('id')}: {str(e)}")
+        
+        # Sort by match score (highest first)
+        match_reports.sort(key=lambda x: x['match_score'], reverse=True)
+        
+        return jsonify({
+            "success": True,
+            "resume_id": resume_id,
+            "resume_filename": resume_store[resume_id].get('filename'),
+            "total_jobs_analyzed": len(jobs),
+            "matching_jobs": len(match_reports),
+            "match_reports": match_reports,
+            "message": f"Generated match report for {len(match_reports)} jobs"
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Error generating match report: {str(e)}"
+        }), 500
+
+
 if __name__ == '__main__':
     # Development server. For production use a WSGI server (gunicorn).
     app.run(host='0.0.0.0', port=5000, debug=True)
+
+# Upload and analyze resume
+with open('resume.pdf', 'rb') as f:
+    r = requests.post('http://localhost:5000/api/resume-upload', files={'resume': f})
+    resume_id = r.json()['resume_id']
+
+# Get analysis
+analysis = requests.get(f'http://localhost:5000/api/analyze-resume/{resume_id}')
+print(analysis.json()['analysis'])
+
+# Compare with job
+comparison = requests.post('http://localhost:5000/api/compare-resume-with-job',
+    json={'resume_id': resume_id, 'job_id': 'job-123'})
+print(f"Match: {comparison.json()['comparison']['weighted_match_score']}%")
