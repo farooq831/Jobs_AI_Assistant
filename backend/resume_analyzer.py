@@ -591,6 +591,594 @@ class ResumeAnalyzer:
             )
         
         return recommendations
+    
+    def generate_optimization_tips(self, 
+                                   resume_text: str = None,
+                                   resume_keywords: Dict = None,
+                                   job_descriptions: List[str] = None,
+                                   job_keywords_list: List[Dict] = None,
+                                   user_preferences: Dict = None) -> Dict[str, any]:
+        """
+        Task 6.3: Generate Optimization Tips
+        Generate comprehensive, actionable recommendations for resume improvement.
+        
+        Args:
+            resume_text: Resume text (optional if resume_keywords provided)
+            resume_keywords: Pre-extracted resume keywords (optional)
+            job_descriptions: List of job descriptions to analyze against (optional)
+            job_keywords_list: List of pre-extracted job keywords (optional)
+            user_preferences: User job preferences (optional, for targeted tips)
+            
+        Returns:
+            Dictionary with categorized optimization tips formatted for frontend and Excel export
+        """
+        # Extract resume keywords if not provided
+        if resume_keywords is None:
+            if resume_text is None:
+                raise ValueError("Either resume_text or resume_keywords must be provided")
+            resume_keywords = self.extract_resume_keywords(resume_text)
+        
+        tips = {
+            'format_version': '1.0',
+            'generated_at': self._get_timestamp(),
+            'overall_assessment': {
+                'strength_score': 0,  # 0-100
+                'areas_for_improvement': [],
+                'key_strengths': []
+            },
+            'critical_tips': [],  # High priority, must address
+            'important_tips': [],  # Medium priority, should address
+            'optional_tips': [],  # Nice to have, low priority
+            'keyword_tips': [],  # Specific keyword recommendations
+            'formatting_tips': [],  # Resume structure and formatting
+            'content_tips': [],  # Content quality and completeness
+            'tailoring_tips': [],  # Job-specific customization
+            'summary': '',  # Executive summary for quick view
+            'action_items': []  # Concrete next steps
+        }
+        
+        # Analyze resume structure and completeness
+        self._add_structural_tips(tips, resume_keywords)
+        
+        # Analyze keyword presence and quality
+        self._add_keyword_quality_tips(tips, resume_keywords)
+        
+        # If job data provided, add job-specific tips
+        if job_descriptions or job_keywords_list:
+            self._add_job_specific_tips(
+                tips, 
+                resume_keywords, 
+                job_descriptions, 
+                job_keywords_list
+            )
+        
+        # Add user preference-based tips
+        if user_preferences:
+            self._add_preference_based_tips(tips, resume_keywords, user_preferences)
+        
+        # Calculate overall assessment
+        self._calculate_overall_assessment(tips, resume_keywords)
+        
+        # Generate summary and action items
+        self._generate_summary_and_actions(tips)
+        
+        # Prioritize and categorize tips
+        self._prioritize_tips(tips)
+        
+        return tips
+    
+    def _get_timestamp(self) -> str:
+        """Get current timestamp in ISO format."""
+        from datetime import datetime
+        return datetime.now().isoformat()
+    
+    def _add_structural_tips(self, tips: Dict, resume_keywords: Dict):
+        """Add tips related to resume structure and completeness."""
+        sections_found = resume_keywords.get('sections_found', {})
+        contact_info = resume_keywords.get('contact_info', {})
+        
+        # Check for missing sections
+        if not sections_found.get('experience'):
+            tips['critical_tips'].append({
+                'category': 'structure',
+                'title': 'Add Work Experience Section',
+                'description': 'Your resume appears to be missing a clear work experience section.',
+                'action': 'Add a dedicated "Work Experience" or "Professional Experience" section with your job history.',
+                'priority': 'critical',
+                'impact': 'high'
+            })
+        
+        if not sections_found.get('skills'):
+            tips['critical_tips'].append({
+                'category': 'structure',
+                'title': 'Add Skills Section',
+                'description': 'A dedicated skills section is missing from your resume.',
+                'action': 'Create a "Skills" or "Technical Skills" section listing your key competencies.',
+                'priority': 'critical',
+                'impact': 'high'
+            })
+        
+        if not sections_found.get('education'):
+            tips['important_tips'].append({
+                'category': 'structure',
+                'title': 'Include Education Section',
+                'description': 'Your resume lacks a clear education section.',
+                'action': 'Add an "Education" section with your degrees, institutions, and graduation dates.',
+                'priority': 'important',
+                'impact': 'medium'
+            })
+        
+        if not sections_found.get('projects') and not sections_found.get('certifications'):
+            tips['optional_tips'].append({
+                'category': 'structure',
+                'title': 'Consider Adding Projects or Certifications',
+                'description': 'Additional sections can strengthen your profile.',
+                'action': 'Add a "Projects" section showcasing your work, or a "Certifications" section for relevant credentials.',
+                'priority': 'optional',
+                'impact': 'low'
+            })
+        
+        # Check contact information
+        if not contact_info.get('email'):
+            tips['critical_tips'].append({
+                'category': 'contact',
+                'title': 'Add Email Address',
+                'description': 'No email address found on resume.',
+                'action': 'Include a professional email address at the top of your resume.',
+                'priority': 'critical',
+                'impact': 'high'
+            })
+        
+        if not contact_info.get('phone'):
+            tips['important_tips'].append({
+                'category': 'contact',
+                'title': 'Add Phone Number',
+                'description': 'No phone number found on resume.',
+                'action': 'Include a contact phone number for recruiters to reach you.',
+                'priority': 'important',
+                'impact': 'medium'
+            })
+        
+        if not contact_info.get('linkedin'):
+            tips['optional_tips'].append({
+                'category': 'contact',
+                'title': 'Add LinkedIn Profile',
+                'description': 'Including your LinkedIn profile can provide additional credibility.',
+                'action': 'Add your LinkedIn profile URL if you have one.',
+                'priority': 'optional',
+                'impact': 'low'
+            })
+    
+    def _add_keyword_quality_tips(self, tips: Dict, resume_keywords: Dict):
+        """Add tips related to keyword quality and density."""
+        tech_skills = resume_keywords.get('technical_skills', [])
+        soft_skills = resume_keywords.get('soft_skills', [])
+        keyword_count = resume_keywords.get('keyword_count', 0)
+        
+        # Technical skills assessment
+        if len(tech_skills) < 5:
+            tips['important_tips'].append({
+                'category': 'keywords',
+                'title': 'Increase Technical Skills',
+                'description': f'Only {len(tech_skills)} technical skills detected. Most competitive resumes have 10-15.',
+                'action': 'List more specific technical skills, tools, and technologies you have experience with.',
+                'priority': 'important',
+                'impact': 'high'
+            })
+        elif len(tech_skills) > 30:
+            tips['optional_tips'].append({
+                'category': 'keywords',
+                'title': 'Focus Your Technical Skills',
+                'description': f'{len(tech_skills)} technical skills listed may be too many.',
+                'action': 'Focus on your strongest and most relevant 15-20 technical skills.',
+                'priority': 'optional',
+                'impact': 'low'
+            })
+        
+        # Soft skills assessment
+        if len(soft_skills) < 3:
+            tips['important_tips'].append({
+                'category': 'keywords',
+                'title': 'Highlight Soft Skills',
+                'description': f'Only {len(soft_skills)} soft skills detected.',
+                'action': 'Include examples of soft skills like leadership, communication, teamwork, or problem-solving in your experience descriptions.',
+                'priority': 'important',
+                'impact': 'medium'
+            })
+        
+        # Overall keyword density
+        word_count = resume_keywords.get('word_count', 0)
+        if word_count > 0:
+            keyword_density = (keyword_count / word_count) * 100
+            
+            if keyword_density < 5:
+                tips['important_tips'].append({
+                    'category': 'keywords',
+                    'title': 'Increase Keyword Density',
+                    'description': f'Keyword density is {keyword_density:.1f}%. Target 8-12% for better ATS compatibility.',
+                    'action': 'Add more industry-specific terminology and skills throughout your resume.',
+                    'priority': 'important',
+                    'impact': 'high'
+                })
+    
+    def _add_job_specific_tips(self, tips: Dict, resume_keywords: Dict, 
+                               job_descriptions: List[str] = None,
+                               job_keywords_list: List[Dict] = None):
+        """Add tips specific to target job postings."""
+        if job_descriptions:
+            # Analyze job keywords
+            analysis = self.analyze_job_keywords(
+                job_descriptions=job_descriptions,
+                resume_keywords=resume_keywords,
+                top_n=20
+            )
+            
+            missing = analysis['missing_keywords']
+            coverage = analysis['analysis_summary']
+            
+            # Critical missing technical skills
+            if missing['critical_technical']:
+                skills_str = ', '.join([k['keyword'] for k in missing['critical_technical'][:5]])
+                tips['critical_tips'].append({
+                    'category': 'job_match',
+                    'title': 'Add Critical Technical Skills',
+                    'description': f'These skills appear in 50%+ of target jobs but are missing from your resume.',
+                    'action': f'Add experience or training in: {skills_str}',
+                    'priority': 'critical',
+                    'impact': 'high',
+                    'keywords': [k['keyword'] for k in missing['critical_technical'][:5]]
+                })
+            
+            # Important missing technical skills
+            if missing['important_technical']:
+                skills_str = ', '.join([k['keyword'] for k in missing['important_technical'][:5]])
+                tips['important_tips'].append({
+                    'category': 'job_match',
+                    'title': 'Consider Adding These Technical Skills',
+                    'description': f'These skills appear in 30-50% of target jobs.',
+                    'action': f'If you have experience with {skills_str}, make sure to include it.',
+                    'priority': 'important',
+                    'impact': 'medium',
+                    'keywords': [k['keyword'] for k in missing['important_technical'][:5]]
+                })
+            
+            # Critical missing soft skills
+            if missing['critical_soft_skills']:
+                skills_str = ', '.join([k['keyword'] for k in missing['critical_soft_skills'][:3]])
+                tips['important_tips'].append({
+                    'category': 'job_match',
+                    'title': 'Highlight Key Soft Skills',
+                    'description': f'These soft skills appear frequently in target jobs.',
+                    'action': f'Include examples demonstrating: {skills_str}',
+                    'priority': 'important',
+                    'impact': 'medium',
+                    'keywords': [k['keyword'] for k in missing['critical_soft_skills'][:3]]
+                })
+            
+            # Coverage-based tips
+            tech_coverage = coverage['technical_coverage_percentage']
+            if tech_coverage < 40:
+                tips['critical_tips'].append({
+                    'category': 'coverage',
+                    'title': 'Low Technical Skills Match',
+                    'description': f'Only {tech_coverage:.0f}% of required technical skills are present.',
+                    'action': 'Review job postings and add the most common technical requirements you possess.',
+                    'priority': 'critical',
+                    'impact': 'high'
+                })
+            elif tech_coverage < 60:
+                tips['important_tips'].append({
+                    'category': 'coverage',
+                    'title': 'Improve Technical Skills Match',
+                    'description': f'{tech_coverage:.0f}% technical skills coverage. Aim for 70%+ for better results.',
+                    'action': 'Add more relevant technical skills from job postings.',
+                    'priority': 'important',
+                    'impact': 'medium'
+                })
+    
+    def _add_preference_based_tips(self, tips: Dict, resume_keywords: Dict, 
+                                   user_preferences: Dict):
+        """Add tips based on user's job preferences."""
+        target_titles = user_preferences.get('job_titles', [])
+        target_location = user_preferences.get('location')
+        job_types = user_preferences.get('job_types', [])
+        
+        if target_titles:
+            tips['tailoring_tips'].append({
+                'category': 'targeting',
+                'title': 'Tailor for Target Roles',
+                'description': f'Optimize your resume for: {", ".join(target_titles)}',
+                'action': 'Ensure your resume highlights experience and skills relevant to these specific roles.',
+                'priority': 'important',
+                'impact': 'medium'
+            })
+        
+        if target_location:
+            tips['tailoring_tips'].append({
+                'category': 'location',
+                'title': 'Location Targeting',
+                'description': f'Targeting jobs in {target_location}',
+                'action': 'Consider mentioning local experience or willingness to relocate if applicable.',
+                'priority': 'optional',
+                'impact': 'low'
+            })
+        
+        if 'Remote' in job_types:
+            tips['tailoring_tips'].append({
+                'category': 'remote_work',
+                'title': 'Highlight Remote Work Skills',
+                'description': 'Targeting remote positions',
+                'action': 'Emphasize remote collaboration tools, self-motivation, and async communication skills.',
+                'priority': 'optional',
+                'impact': 'low'
+            })
+    
+    def _calculate_overall_assessment(self, tips: Dict, resume_keywords: Dict):
+        """Calculate overall resume strength and identify key areas."""
+        # Calculate strength score based on various factors
+        score = 50  # Base score
+        
+        sections_found = resume_keywords.get('sections_found', {})
+        contact_info = resume_keywords.get('contact_info', {})
+        tech_skills = resume_keywords.get('technical_skills', [])
+        soft_skills = resume_keywords.get('soft_skills', [])
+        
+        # Add points for completeness
+        if sections_found.get('experience'): score += 10
+        if sections_found.get('skills'): score += 10
+        if sections_found.get('education'): score += 5
+        if sections_found.get('projects'): score += 5
+        if sections_found.get('certifications'): score += 5
+        
+        # Add points for contact info
+        if contact_info.get('email'): score += 5
+        if contact_info.get('phone'): score += 3
+        if contact_info.get('linkedin'): score += 2
+        
+        # Add points for skills
+        if len(tech_skills) >= 10: score += 10
+        elif len(tech_skills) >= 5: score += 5
+        
+        if len(soft_skills) >= 5: score += 5
+        
+        # Deduct points for issues
+        critical_issues = len(tips.get('critical_tips', []))
+        score -= (critical_issues * 5)
+        
+        # Ensure score is in 0-100 range
+        score = max(0, min(100, score))
+        
+        tips['overall_assessment']['strength_score'] = score
+        
+        # Identify strengths
+        strengths = []
+        if len(tech_skills) >= 10:
+            strengths.append('Strong technical skills profile')
+        if sections_found.get('projects'):
+            strengths.append('Includes relevant projects')
+        if sections_found.get('certifications'):
+            strengths.append('Professional certifications listed')
+        if len(soft_skills) >= 5:
+            strengths.append('Good soft skills coverage')
+        
+        tips['overall_assessment']['key_strengths'] = strengths
+        
+        # Identify areas for improvement
+        areas = []
+        if score < 60:
+            areas.append('Overall resume completeness')
+        if len(tech_skills) < 8:
+            areas.append('Technical skills breadth')
+        if not sections_found.get('experience'):
+            areas.append('Work experience section')
+        if critical_issues > 0:
+            areas.append(f'{critical_issues} critical issues to address')
+        
+        tips['overall_assessment']['areas_for_improvement'] = areas
+    
+    def _generate_summary_and_actions(self, tips: Dict):
+        """Generate executive summary and concrete action items."""
+        score = tips['overall_assessment']['strength_score']
+        critical_count = len(tips.get('critical_tips', []))
+        important_count = len(tips.get('important_tips', []))
+        
+        # Generate summary
+        if score >= 80:
+            summary = f"Your resume is strong (score: {score}/100). "
+        elif score >= 60:
+            summary = f"Your resume is decent (score: {score}/100) but has room for improvement. "
+        else:
+            summary = f"Your resume needs significant improvement (score: {score}/100). "
+        
+        if critical_count > 0:
+            summary += f"Address {critical_count} critical issue(s) immediately. "
+        if important_count > 0:
+            summary += f"Consider {important_count} important recommendation(s). "
+        
+        tips['summary'] = summary.strip()
+        
+        # Generate action items (top 5-7 concrete steps)
+        action_items = []
+        
+        # Add critical actions
+        for tip in tips.get('critical_tips', [])[:3]:
+            action_items.append({
+                'priority': 1,
+                'action': tip['action'],
+                'category': tip['category']
+            })
+        
+        # Add important actions
+        for tip in tips.get('important_tips', [])[:3]:
+            action_items.append({
+                'priority': 2,
+                'action': tip['action'],
+                'category': tip['category']
+            })
+        
+        # Add one optional action if space
+        if len(action_items) < 7 and tips.get('optional_tips'):
+            action_items.append({
+                'priority': 3,
+                'action': tips['optional_tips'][0]['action'],
+                'category': tips['optional_tips'][0]['category']
+            })
+        
+        tips['action_items'] = action_items
+    
+    def _prioritize_tips(self, tips: Dict):
+        """Ensure tips are properly prioritized and categorized."""
+        # Sort each category by impact
+        def sort_by_impact(tip):
+            impact_order = {'high': 0, 'medium': 1, 'low': 2}
+            return impact_order.get(tip.get('impact', 'low'), 3)
+        
+        tips['critical_tips'].sort(key=sort_by_impact)
+        tips['important_tips'].sort(key=sort_by_impact)
+        tips['optional_tips'].sort(key=sort_by_impact)
+    
+    def format_tips_for_excel(self, tips: Dict) -> List[Dict]:
+        """
+        Format optimization tips for Excel export.
+        
+        Args:
+            tips: Tips dictionary from generate_optimization_tips()
+            
+        Returns:
+            List of dictionaries suitable for Excel rows
+        """
+        excel_rows = []
+        
+        # Add summary row
+        excel_rows.append({
+            'Priority': 'SUMMARY',
+            'Category': 'Overview',
+            'Title': 'Resume Optimization Summary',
+            'Description': tips['summary'],
+            'Action': f"Overall Score: {tips['overall_assessment']['strength_score']}/100",
+            'Impact': 'N/A'
+        })
+        
+        # Add critical tips
+        for tip in tips.get('critical_tips', []):
+            excel_rows.append({
+                'Priority': '🔴 CRITICAL',
+                'Category': tip.get('category', '').upper(),
+                'Title': tip.get('title', ''),
+                'Description': tip.get('description', ''),
+                'Action': tip.get('action', ''),
+                'Impact': tip.get('impact', 'high').upper()
+            })
+        
+        # Add important tips
+        for tip in tips.get('important_tips', []):
+            excel_rows.append({
+                'Priority': '🟡 IMPORTANT',
+                'Category': tip.get('category', '').upper(),
+                'Title': tip.get('title', ''),
+                'Description': tip.get('description', ''),
+                'Action': tip.get('action', ''),
+                'Impact': tip.get('impact', 'medium').upper()
+            })
+        
+        # Add optional tips
+        for tip in tips.get('optional_tips', []):
+            excel_rows.append({
+                'Priority': '⚪ OPTIONAL',
+                'Category': tip.get('category', '').upper(),
+                'Title': tip.get('title', ''),
+                'Description': tip.get('description', ''),
+                'Action': tip.get('action', ''),
+                'Impact': tip.get('impact', 'low').upper()
+            })
+        
+        return excel_rows
+    
+    def format_tips_for_frontend(self, tips: Dict) -> Dict:
+        """
+        Format optimization tips for frontend display.
+        
+        Args:
+            tips: Tips dictionary from generate_optimization_tips()
+            
+        Returns:
+            Formatted dictionary optimized for frontend rendering
+        """
+        return {
+            'metadata': {
+                'version': tips['format_version'],
+                'generated_at': tips['generated_at'],
+                'timestamp_readable': self._format_readable_timestamp(tips['generated_at'])
+            },
+            'score': {
+                'value': tips['overall_assessment']['strength_score'],
+                'max': 100,
+                'level': self._get_score_level(tips['overall_assessment']['strength_score']),
+                'color': self._get_score_color(tips['overall_assessment']['strength_score'])
+            },
+            'summary': tips['summary'],
+            'strengths': tips['overall_assessment']['key_strengths'],
+            'areas_to_improve': tips['overall_assessment']['areas_for_improvement'],
+            'tips_by_priority': {
+                'critical': {
+                    'count': len(tips['critical_tips']),
+                    'items': tips['critical_tips'],
+                    'badge_color': 'red',
+                    'icon': '🔴'
+                },
+                'important': {
+                    'count': len(tips['important_tips']),
+                    'items': tips['important_tips'],
+                    'badge_color': 'yellow',
+                    'icon': '🟡'
+                },
+                'optional': {
+                    'count': len(tips['optional_tips']),
+                    'items': tips['optional_tips'],
+                    'badge_color': 'gray',
+                    'icon': '⚪'
+                }
+            },
+            'action_plan': {
+                'title': 'Your Action Plan',
+                'description': 'Follow these steps to improve your resume',
+                'steps': tips['action_items']
+            },
+            'statistics': {
+                'total_tips': len(tips['critical_tips']) + len(tips['important_tips']) + len(tips['optional_tips']),
+                'critical_count': len(tips['critical_tips']),
+                'important_count': len(tips['important_tips']),
+                'optional_count': len(tips['optional_tips'])
+            }
+        }
+    
+    def _format_readable_timestamp(self, iso_timestamp: str) -> str:
+        """Convert ISO timestamp to readable format."""
+        from datetime import datetime
+        dt = datetime.fromisoformat(iso_timestamp)
+        return dt.strftime("%B %d, %Y at %I:%M %p")
+    
+    def _get_score_level(self, score: int) -> str:
+        """Get score level description."""
+        if score >= 80:
+            return 'Excellent'
+        elif score >= 60:
+            return 'Good'
+        elif score >= 40:
+            return 'Fair'
+        else:
+            return 'Needs Improvement'
+    
+    def _get_score_color(self, score: int) -> str:
+        """Get color code for score."""
+        if score >= 80:
+            return '#28a745'  # Green
+        elif score >= 60:
+            return '#ffc107'  # Yellow
+        elif score >= 40:
+            return '#fd7e14'  # Orange
+        else:
+            return '#dc3545'  # Red
 
 
 # Singleton instance
