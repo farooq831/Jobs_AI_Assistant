@@ -660,3 +660,226 @@ class JobStorageManager:
         except Exception as e:
             logger.error(f"Error getting scored jobs: {e}")
             return []
+    
+    def update_job_status(self, job_id: str, status: str, 
+                         applied_date: Optional[str] = None,
+                         notes: Optional[str] = None) -> Dict:
+        """
+        Update application status for a job
+        
+        Args:
+            job_id: Job identifier
+            status: Application status (Applied, Interview, Offer, Rejected, Pending)
+            applied_date: Date when applied (ISO format)
+            notes: Additional notes about the application
+            
+        Returns:
+            Dict with success status and details
+        """
+        with self.lock:
+            try:
+                data = self._read_json(self.jobs_file)
+                jobs = data.get("jobs", [])
+                
+                # Find the job
+                job_found = False
+                for job in jobs:
+                    if str(job.get("job_id")) == str(job_id):
+                        job_found = True
+                        
+                        # Store old status for history
+                        old_status = job.get("application_status")
+                        
+                        # Update status
+                        job["application_status"] = status
+                        
+                        if applied_date:
+                            job["applied_date"] = applied_date
+                            
+                        if notes:
+                            job["application_notes"] = notes
+                            
+                        # Add to status history
+                        if "status_history" not in job:
+                            job["status_history"] = []
+                            
+                        job["status_history"].append({
+                            "old_status": old_status,
+                            "new_status": status,
+                            "timestamp": datetime.now().isoformat(),
+                            "notes": notes
+                        })
+                        
+                        job["last_updated"] = datetime.now().isoformat()
+                        break
+                
+                if not job_found:
+                    return {
+                        "success": False,
+                        "error": f"Job not found: {job_id}"
+                    }
+                
+                # Save updated data
+                self._write_json(self.jobs_file, data)
+                
+                return {
+                    "success": True,
+                    "job_id": job_id,
+                    "status": status,
+                    "message": "Status updated successfully"
+                }
+                
+            except Exception as e:
+                logger.error(f"Error updating job status: {e}")
+                return {
+                    "success": False,
+                    "error": str(e)
+                }
+    
+    def batch_update_job_statuses(self, status_updates: List[Dict]) -> Dict:
+        """
+        Update application statuses for multiple jobs
+        
+        Args:
+            status_updates: List of dicts with job_id, status, applied_date, notes
+            
+        Returns:
+            Dict with batch update results
+        """
+        with self.lock:
+            try:
+                data = self._read_json(self.jobs_file)
+                jobs = data.get("jobs", [])
+                
+                # Create job lookup
+                jobs_lookup = {str(job.get("job_id")): job for job in jobs}
+                
+                updated_count = 0
+                not_found = []
+                errors = []
+                
+                for update in status_updates:
+                    job_id = str(update.get("job_id"))
+                    status = update.get("new_status") or update.get("status")
+                    applied_date = update.get("applied_date")
+                    notes = update.get("notes")
+                    
+                    if job_id in jobs_lookup:
+                        job = jobs_lookup[job_id]
+                        old_status = job.get("application_status")
+                        
+                        # Update status
+                        job["application_status"] = status
+                        
+                        if applied_date:
+                            job["applied_date"] = applied_date
+                            
+                        if notes:
+                            job["application_notes"] = notes
+                            
+                        # Add to status history
+                        if "status_history" not in job:
+                            job["status_history"] = []
+                            
+                        job["status_history"].append({
+                            "old_status": old_status,
+                            "new_status": status,
+                            "timestamp": update.get("timestamp", datetime.now().isoformat()),
+                            "notes": notes
+                        })
+                        
+                        job["last_updated"] = datetime.now().isoformat()
+                        updated_count += 1
+                    else:
+                        not_found.append(job_id)
+                
+                # Save updated data
+                if updated_count > 0:
+                    self._write_json(self.jobs_file, data)
+                
+                return {
+                    "success": True,
+                    "updated": updated_count,
+                    "not_found": len(not_found),
+                    "not_found_ids": not_found,
+                    "total_requested": len(status_updates)
+                }
+                
+            except Exception as e:
+                logger.error(f"Error in batch status update: {e}")
+                return {
+                    "success": False,
+                    "error": str(e),
+                    "updated": 0
+                }
+    
+    def get_jobs_by_status(self, status: str) -> List[Dict]:
+        """
+        Get all jobs with a specific application status
+        
+        Args:
+            status: Application status to filter by
+            
+        Returns:
+            List of jobs with the specified status
+        """
+        try:
+            all_jobs = self.get_all_jobs()
+            return [job for job in all_jobs if job.get("application_status") == status]
+        except Exception as e:
+            logger.error(f"Error getting jobs by status: {e}")
+            return []
+    
+    def get_status_summary(self) -> Dict:
+        """
+        Get summary of application statuses across all jobs
+        
+        Returns:
+            Dict with status counts and statistics
+        """
+        try:
+            all_jobs = self.get_all_jobs()
+            
+            summary = {
+                "total_jobs": len(all_jobs),
+                "status_counts": {},
+                "jobs_with_status": 0,
+                "jobs_without_status": 0,
+                "recent_applications": []
+            }
+            
+            # Count statuses
+            for job in all_jobs:
+                status = job.get("application_status")
+                if status:
+                    summary["status_counts"][status] = summary["status_counts"].get(status, 0) + 1
+                    summary["jobs_with_status"] += 1
+                else:
+                    summary["jobs_without_status"] += 1
+                    
+                # Track recent applications
+                if job.get("applied_date"):
+                    summary["recent_applications"].append({
+                        "job_id": job.get("job_id"),
+                        "title": job.get("title"),
+                        "company": job.get("company"),
+                        "status": status,
+                        "applied_date": job.get("applied_date")
+                    })
+            
+            # Sort recent applications by date
+            summary["recent_applications"].sort(
+                key=lambda x: x.get("applied_date", ""), 
+                reverse=True
+            )
+            summary["recent_applications"] = summary["recent_applications"][:10]
+            
+            return summary
+            
+        except Exception as e:
+            logger.error(f"Error getting status summary: {e}")
+            return {
+                "total_jobs": 0,
+                "status_counts": {},
+                "error": str(e)
+            }

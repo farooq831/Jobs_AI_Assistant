@@ -18,6 +18,7 @@ from job_scorer import get_job_scorer
 from resume_analyzer import get_resume_analyzer
 from excel_exporter import export_jobs_to_excel
 from csv_pdf_exporter import export_jobs_to_csv, export_jobs_to_pdf
+from excel_uploader import ExcelUploader, ExcelUploadError
 import requests
 
 app = Flask(__name__)
@@ -3405,6 +3406,343 @@ def quick_export_pdf(user_id):
         return jsonify({'error': f'Export failed: {str(e)}'}), 500
 
 
+# ================================================================================
+# Excel Upload Endpoints (Task 7.3)
+# ================================================================================
+
+@app.route('/api/upload/excel', methods=['POST'])
+def upload_excel():
+    """
+    Upload and parse an Excel file for job application status tracking
+    
+    Returns:
+        JSON with parsed data, validation results, and summary
+    """
+    try:
+        # Check if file was uploaded
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file provided'}), 400
+        
+        file = request.files['file']
+        
+        if file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
+        
+        # Check file extension
+        if not file.filename.endswith(('.xlsx', '.xls')):
+            return jsonify({'error': 'Invalid file type. Only Excel files (.xlsx, .xls) are allowed'}), 400
+        
+        # Get optional parameters
+        sheet_name = request.form.get('sheet_name')
+        validate_against_storage = request.form.get('validate_against_storage', 'false').lower() == 'true'
+        
+        # Read file content
+        file_content = file.read()
+        
+        # Parse Excel file
+        uploader = ExcelUploader()
+        result = uploader.parse_excel_bytes(file_content, sheet_name=sheet_name)
+        
+        # Optionally validate against stored jobs
+        if validate_against_storage and result['success']:
+            stored_jobs = storage_manager.get_all_jobs()
+            validation_result = uploader.validate_against_stored_jobs(
+                result['data'], 
+                stored_jobs
+            )
+            result['validation'] = validation_result
+        
+        return jsonify(result), 200
+    
+    except ExcelUploadError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'error': f'Upload failed: {str(e)}'}), 500
+
+
+@app.route('/api/upload/excel/validate', methods=['POST'])
+def validate_excel_upload():
+    """
+    Validate uploaded Excel file against stored jobs without applying updates
+    
+    Returns:
+        JSON with validation results including matches, mismatches, and new jobs
+    """
+    try:
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file provided'}), 400
+        
+        file = request.files['file']
+        
+        if file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
+        
+        if not file.filename.endswith(('.xlsx', '.xls')):
+            return jsonify({'error': 'Invalid file type'}), 400
+        
+        sheet_name = request.form.get('sheet_name')
+        
+        # Parse Excel
+        file_content = file.read()
+        uploader = ExcelUploader()
+        parse_result = uploader.parse_excel_bytes(file_content, sheet_name=sheet_name)
+        
+        if not parse_result['success']:
+            return jsonify({
+                'error': 'Failed to parse Excel file',
+                'details': parse_result
+            }), 400
+        
+        # Validate against stored jobs
+        stored_jobs = storage_manager.get_all_jobs()
+        validation_result = uploader.validate_against_stored_jobs(
+            parse_result['data'],
+            stored_jobs
+        )
+        
+        # Get status updates
+        status_updates = uploader.get_status_updates(
+            parse_result['data'],
+            stored_jobs
+        )
+        
+        return jsonify({
+            'success': True,
+            'parse_summary': parse_result['summary'],
+            'validation': validation_result,
+            'status_updates': status_updates,
+            'total_updates': len(status_updates),
+            'errors': parse_result['errors'],
+            'warnings': parse_result['warnings']
+        }), 200
+    
+    except ExcelUploadError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'error': f'Validation failed: {str(e)}'}), 500
+
+
+@app.route('/api/upload/excel/apply-updates', methods=['POST'])
+def apply_excel_updates():
+    """
+    Parse Excel file and apply status updates to stored jobs
+    
+    Returns:
+        JSON with update results and summary
+    """
+    try:
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file provided'}), 400
+        
+        file = request.files['file']
+        
+        if file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
+        
+        if not file.filename.endswith(('.xlsx', '.xls')):
+            return jsonify({'error': 'Invalid file type'}), 400
+        
+        sheet_name = request.form.get('sheet_name')
+        
+        # Parse Excel
+        file_content = file.read()
+        uploader = ExcelUploader()
+        parse_result = uploader.parse_excel_bytes(file_content, sheet_name=sheet_name)
+        
+        if not parse_result['success']:
+            return jsonify({
+                'error': 'Failed to parse Excel file',
+                'details': parse_result
+            }), 400
+        
+        # Get stored jobs
+        stored_jobs = storage_manager.get_all_jobs()
+        
+        # Get status updates
+        status_updates = uploader.get_status_updates(
+            parse_result['data'],
+            stored_jobs
+        )
+        
+        # Apply updates
+        if status_updates:
+            update_result = storage_manager.batch_update_job_statuses(status_updates)
+        else:
+            update_result = {
+                'success': True,
+                'updated': 0,
+                'not_found': 0,
+                'total_requested': 0
+            }
+        
+        return jsonify({
+            'success': True,
+            'parse_summary': parse_result['summary'],
+            'updates_applied': update_result,
+            'status_updates': status_updates,
+            'errors': parse_result['errors'],
+            'warnings': parse_result['warnings']
+        }), 200
+    
+    except ExcelUploadError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'error': f'Update failed: {str(e)}'}), 500
+
+
+@app.route('/api/jobs/status/<job_id>', methods=['PUT'])
+def update_job_status(job_id):
+    """
+    Update application status for a single job
+    
+    Request body:
+        {
+            "status": "Applied",
+            "applied_date": "2025-11-13",
+            "notes": "Applied via company website"
+        }
+    
+    Returns:
+        JSON with update result
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        status = data.get('status')
+        if not status:
+            return jsonify({'error': 'Status is required'}), 400
+        
+        # Validate status
+        valid_statuses = {'Applied', 'Interview', 'Offer', 'Rejected', 'Pending'}
+        if status not in valid_statuses:
+            return jsonify({
+                'error': f'Invalid status. Valid values: {", ".join(valid_statuses)}'
+            }), 400
+        
+        applied_date = data.get('applied_date')
+        notes = data.get('notes')
+        
+        # Update status
+        result = storage_manager.update_job_status(
+            job_id=job_id,
+            status=status,
+            applied_date=applied_date,
+            notes=notes
+        )
+        
+        if result['success']:
+            return jsonify(result), 200
+        else:
+            return jsonify(result), 404
+    
+    except Exception as e:
+        return jsonify({'error': f'Status update failed: {str(e)}'}), 500
+
+
+@app.route('/api/jobs/status', methods=['GET'])
+def get_jobs_by_status():
+    """
+    Get jobs filtered by application status
+    
+    Query params:
+        status: Application status to filter by
+    
+    Returns:
+        JSON with filtered jobs
+    """
+    try:
+        status = request.args.get('status')
+        
+        if not status:
+            return jsonify({'error': 'Status parameter is required'}), 400
+        
+        jobs = storage_manager.get_jobs_by_status(status)
+        
+        return jsonify({
+            'success': True,
+            'status': status,
+            'count': len(jobs),
+            'jobs': jobs
+        }), 200
+    
+    except Exception as e:
+        return jsonify({'error': f'Query failed: {str(e)}'}), 500
+
+
+@app.route('/api/jobs/status/summary', methods=['GET'])
+def get_status_summary():
+    """
+    Get summary of application statuses across all jobs
+    
+    Returns:
+        JSON with status counts and statistics
+    """
+    try:
+        summary = storage_manager.get_status_summary()
+        
+        return jsonify({
+            'success': True,
+            'summary': summary
+        }), 200
+    
+    except Exception as e:
+        return jsonify({'error': f'Summary failed: {str(e)}'}), 500
+
+
+@app.route('/api/jobs/batch-status', methods=['PUT'])
+def batch_update_statuses():
+    """
+    Update application statuses for multiple jobs
+    
+    Request body:
+        {
+            "updates": [
+                {
+                    "job_id": "123",
+                    "status": "Applied",
+                    "applied_date": "2025-11-13",
+                    "notes": "Applied via LinkedIn"
+                },
+                ...
+            ]
+        }
+    
+    Returns:
+        JSON with batch update results
+    """
+    try:
+        data = request.get_json()
+        
+        if not data or 'updates' not in data:
+            return jsonify({'error': 'Updates array is required'}), 400
+        
+        updates = data['updates']
+        
+        if not isinstance(updates, list):
+            return jsonify({'error': 'Updates must be an array'}), 400
+        
+        # Validate statuses
+        valid_statuses = {'Applied', 'Interview', 'Offer', 'Rejected', 'Pending'}
+        for update in updates:
+            status = update.get('status') or update.get('new_status')
+            if status and status not in valid_statuses:
+                return jsonify({
+                    'error': f'Invalid status in update: {status}. Valid values: {", ".join(valid_statuses)}'
+                }), 400
+        
+        # Apply batch update
+        result = storage_manager.batch_update_job_statuses(updates)
+        
+        return jsonify(result), 200
+    
+    except Exception as e:
+        return jsonify({'error': f'Batch update failed: {str(e)}'}), 500
+
+
 if __name__ == '__main__':
     # Development server. For production use a WSGI server (gunicorn).
     app.run(host='0.0.0.0', port=5000, debug=True)
+
