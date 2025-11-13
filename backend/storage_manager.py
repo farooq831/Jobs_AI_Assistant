@@ -501,3 +501,162 @@ class JobStorageManager:
         except Exception as e:
             logger.error(f"Error exporting jobs: {e}")
             return False
+    
+    def update_job_score(self, job_id: str, score_data: Dict) -> bool:
+        """
+        Update the score and highlight for a specific job.
+        
+        Args:
+            job_id: Job ID to update
+            score_data: Dictionary with score information (overall_score, highlight, component_scores, etc.)
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        with self.lock:
+            try:
+                data = self._read_json(self.jobs_file)
+                if data is None:
+                    logger.error("Failed to read jobs file")
+                    return False
+                
+                jobs = data.get('jobs', [])
+                job_found = False
+                
+                # Find and update the job
+                for job in jobs:
+                    if job.get('id') == job_id:
+                        job['score'] = score_data
+                        job['scored_at'] = datetime.now().isoformat()
+                        job_found = True
+                        break
+                
+                if not job_found:
+                    logger.warning(f"Job {job_id} not found for score update")
+                    return False
+                
+                # Write updated data
+                data['jobs'] = jobs
+                success = self._write_json(self.jobs_file, data)
+                
+                if success:
+                    logger.info(f"Updated score for job {job_id}")
+                
+                return success
+                
+            except Exception as e:
+                logger.error(f"Error updating job score: {e}")
+                return False
+    
+    def update_jobs_scores(self, job_scores: Dict[str, Dict]) -> Dict:
+        """
+        Update scores for multiple jobs at once.
+        
+        Args:
+            job_scores: Dictionary mapping job_id to score_data
+            
+        Returns:
+            Dictionary with update results
+        """
+        with self.lock:
+            try:
+                data = self._read_json(self.jobs_file)
+                if data is None:
+                    return {
+                        "success": False,
+                        "error": "Failed to read jobs file",
+                        "updated": 0,
+                        "not_found": 0
+                    }
+                
+                jobs = data.get('jobs', [])
+                updated_count = 0
+                not_found_count = 0
+                
+                # Update jobs with scores
+                for job in jobs:
+                    job_id = job.get('id')
+                    if job_id in job_scores:
+                        job['score'] = job_scores[job_id]
+                        job['scored_at'] = datetime.now().isoformat()
+                        updated_count += 1
+                
+                # Check for job IDs that weren't found
+                for job_id in job_scores:
+                    if not any(job.get('id') == job_id for job in jobs):
+                        not_found_count += 1
+                
+                # Write updated data
+                data['jobs'] = jobs
+                if not self._write_json(self.jobs_file, data):
+                    return {
+                        "success": False,
+                        "error": "Failed to write jobs file",
+                        "updated": 0,
+                        "not_found": not_found_count
+                    }
+                
+                logger.info(f"Updated scores for {updated_count} jobs, {not_found_count} not found")
+                
+                return {
+                    "success": True,
+                    "updated": updated_count,
+                    "not_found": not_found_count,
+                    "total_requested": len(job_scores)
+                }
+                
+            except Exception as e:
+                logger.error(f"Error updating job scores: {e}")
+                return {
+                    "success": False,
+                    "error": str(e),
+                    "updated": 0,
+                    "not_found": 0
+                }
+    
+    def get_jobs_by_highlight(self, highlight: str) -> List[Dict]:
+        """
+        Get all jobs with a specific highlight color.
+        
+        Args:
+            highlight: Highlight color ('red', 'yellow', 'white')
+            
+        Returns:
+            List of jobs with the specified highlight
+        """
+        try:
+            all_jobs = self.get_all_jobs()
+            return [job for job in all_jobs if job.get('score', {}).get('highlight') == highlight]
+        except Exception as e:
+            logger.error(f"Error getting jobs by highlight: {e}")
+            return []
+    
+    def get_scored_jobs(self, min_score: Optional[float] = None, 
+                        max_score: Optional[float] = None) -> List[Dict]:
+        """
+        Get jobs filtered by score range.
+        
+        Args:
+            min_score: Minimum score (inclusive)
+            max_score: Maximum score (inclusive)
+            
+        Returns:
+            List of jobs within the score range
+        """
+        try:
+            all_jobs = self.get_all_jobs()
+            scored_jobs = [job for job in all_jobs if 'score' in job]
+            
+            if min_score is not None:
+                scored_jobs = [job for job in scored_jobs 
+                              if job['score'].get('overall_score', 0) >= min_score]
+            
+            if max_score is not None:
+                scored_jobs = [job for job in scored_jobs 
+                              if job['score'].get('overall_score', 100) <= max_score]
+            
+            return scored_jobs
+            
+        except Exception as e:
+            logger.error(f"Error getting scored jobs: {e}")
+            return []
