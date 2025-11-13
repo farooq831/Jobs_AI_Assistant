@@ -214,11 +214,29 @@ Deliverables:
 
 ## Phase 6: Resume Optimization Module
 
-### Task 6.1: Resume Text Extraction  
-- Extract keywords from uploaded resume or directly input skills
+### Task 6.1: Resume Text Extraction (Completed — 2025-11-13)
+- [x] Extract keywords from uploaded resume or directly input skills — see `backend/resume_analyzer.py`
+- [x] Implement resume text extraction and keyword analysis — methods in ResumeAnalyzer class
+- [x] API endpoints for resume analysis — see `backend/app.py`
 
-### Task 6.2: Analyze Job Keywords  
-- Identify high-frequency keywords missing from the resume
+Deliverables:
+- `backend/resume_analyzer.py` — Core resume analysis module with keyword extraction (360+ lines)
+- `backend/app.py` — Added resume analysis endpoints (`/api/analyze-resume`, `/api/analyze-resume/<id>`, `/api/compare-resume-with-job`)
+- `backend/test_resume_analyzer.py` — Comprehensive test suite
+
+### Task 6.2: Analyze Job Keywords (Completed — 2025-11-13)
+- [x] Identify high-frequency keywords missing from the resume — see `backend/resume_analyzer.py` (analyze_job_keywords method)
+- [x] Aggregate keywords across multiple job postings — keyword frequency analysis implemented
+- [x] Calculate keyword coverage and generate recommendations — coverage statistics and priority-based recommendations
+- [x] API endpoints for job keyword analysis — see `backend/app.py`
+
+Deliverables:
+- `backend/resume_analyzer.py` — Enhanced with `analyze_job_keywords()` method (250+ lines)
+- `backend/app.py` — Added 3 keyword analysis endpoints:
+  - `/api/analyze-job-keywords` — Analyze keywords from job descriptions
+  - `/api/analyze-job-keywords/stored-jobs` — Analyze keywords from stored jobs
+  - `/api/missing-keywords-summary/<resume_id>` — Quick summary of missing keywords
+- `backend/test_job_keyword_analysis.py` — Comprehensive test suite (17 test cases, 400+ lines)
 
 ### Task 6.3: Generate Optimization Tips  
 - Prepare actionable recommendations for resume improvement  

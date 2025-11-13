@@ -347,6 +347,250 @@ class ResumeAnalyzer:
             'technical_skills_examples': sorted(list(self.extractor.TECH_SKILLS))[:20],
             'soft_skills_examples': sorted(list(self.extractor.SOFT_SKILLS))
         }
+    
+    def analyze_job_keywords(self, job_descriptions: List[str], 
+                            resume_text: str = None,
+                            resume_keywords: Dict = None,
+                            top_n: int = 30) -> Dict[str, any]:
+        """
+        Task 6.2: Analyze Job Keywords
+        Identify high-frequency keywords missing from the resume across multiple job postings.
+        
+        Args:
+            job_descriptions: List of job description texts
+            resume_text: Resume text (optional, if resume_keywords not provided)
+            resume_keywords: Pre-extracted resume keywords (optional)
+            top_n: Number of top keywords to return
+            
+        Returns:
+            Dictionary with high-frequency keywords analysis and missing keywords
+        """
+        if not job_descriptions:
+            raise ValueError("At least one job description is required")
+        
+        if resume_text is None and resume_keywords is None:
+            raise ValueError("Either resume_text or resume_keywords must be provided")
+        
+        # Extract resume keywords if not provided
+        if resume_keywords is None:
+            resume_keywords = self.extract_resume_keywords(resume_text)
+        
+        # Get resume keyword set for comparison
+        resume_kw_set = set([kw['keyword'] for kw in resume_keywords.get('all_keywords', [])])
+        resume_tech_set = set(resume_keywords.get('technical_skills', []))
+        resume_soft_set = set(resume_keywords.get('soft_skills', []))
+        
+        # Aggregate keywords from all job descriptions
+        all_job_keywords = []
+        tech_keywords_counter = Counter()
+        soft_keywords_counter = Counter()
+        general_keywords_counter = Counter()
+        
+        for job_desc in job_descriptions:
+            # Extract keywords from this job description
+            job_kw = self.extractor.extract_job_keywords(job_desc)
+            all_job_keywords.append(job_kw)
+            
+            # Count technical skills
+            for skill in job_kw.get('technical_skills', []):
+                tech_keywords_counter[skill.lower()] += 1
+            
+            # Count soft skills
+            for skill in job_kw.get('soft_skills', []):
+                soft_keywords_counter[skill.lower()] += 1
+            
+            # Count all keywords
+            for kw_dict in job_kw.get('all_keywords', []):
+                keyword = kw_dict['keyword'].lower()
+                general_keywords_counter[keyword] += 1
+        
+        # Calculate frequencies (as percentage of total jobs)
+        total_jobs = len(job_descriptions)
+        
+        # Get top high-frequency keywords
+        high_freq_technical = [
+            {
+                'keyword': kw,
+                'frequency': count,
+                'percentage': round((count / total_jobs) * 100, 1),
+                'in_resume': kw in resume_tech_set or kw in resume_kw_set
+            }
+            for kw, count in tech_keywords_counter.most_common(top_n)
+        ]
+        
+        high_freq_soft = [
+            {
+                'keyword': kw,
+                'frequency': count,
+                'percentage': round((count / total_jobs) * 100, 1),
+                'in_resume': kw in resume_soft_set or kw in resume_kw_set
+            }
+            for kw, count in soft_keywords_counter.most_common(top_n)
+        ]
+        
+        high_freq_general = [
+            {
+                'keyword': kw,
+                'frequency': count,
+                'percentage': round((count / total_jobs) * 100, 1),
+                'in_resume': kw in resume_kw_set
+            }
+            for kw, count in general_keywords_counter.most_common(top_n)
+        ]
+        
+        # Identify missing high-frequency keywords (appearing in >50% of jobs)
+        missing_critical_technical = [
+            item for item in high_freq_technical 
+            if not item['in_resume'] and item['percentage'] >= 50
+        ]
+        
+        missing_important_technical = [
+            item for item in high_freq_technical 
+            if not item['in_resume'] and 30 <= item['percentage'] < 50
+        ]
+        
+        missing_critical_soft = [
+            item for item in high_freq_soft 
+            if not item['in_resume'] and item['percentage'] >= 50
+        ]
+        
+        missing_important_soft = [
+            item for item in high_freq_soft 
+            if not item['in_resume'] and 30 <= item['percentage'] < 50
+        ]
+        
+        # Overall missing keywords from general analysis
+        missing_general = [
+            item for item in high_freq_general 
+            if not item['in_resume'] and item['percentage'] >= 40
+        ]
+        
+        # Calculate coverage statistics
+        total_high_freq_tech = len([k for k in high_freq_technical if k['percentage'] >= 30])
+        matched_high_freq_tech = len([k for k in high_freq_technical if k['in_resume'] and k['percentage'] >= 30])
+        tech_coverage = round((matched_high_freq_tech / total_high_freq_tech * 100) if total_high_freq_tech > 0 else 0, 1)
+        
+        total_high_freq_soft = len([k for k in high_freq_soft if k['percentage'] >= 30])
+        matched_high_freq_soft = len([k for k in high_freq_soft if k['in_resume'] and k['percentage'] >= 30])
+        soft_coverage = round((matched_high_freq_soft / total_high_freq_soft * 100) if total_high_freq_soft > 0 else 0, 1)
+        
+        return {
+            'analysis_summary': {
+                'total_jobs_analyzed': total_jobs,
+                'total_unique_technical_keywords': len(tech_keywords_counter),
+                'total_unique_soft_keywords': len(soft_keywords_counter),
+                'total_unique_keywords': len(general_keywords_counter),
+                'technical_coverage_percentage': tech_coverage,
+                'soft_skills_coverage_percentage': soft_coverage
+            },
+            'high_frequency_keywords': {
+                'technical_skills': high_freq_technical[:top_n],
+                'soft_skills': high_freq_soft[:top_n],
+                'general_keywords': high_freq_general[:top_n]
+            },
+            'missing_keywords': {
+                'critical_technical': missing_critical_technical,  # >50% frequency, not in resume
+                'important_technical': missing_important_technical,  # 30-50% frequency, not in resume
+                'critical_soft_skills': missing_critical_soft,  # >50% frequency, not in resume
+                'important_soft_skills': missing_important_soft,  # 30-50% frequency, not in resume
+                'general_missing': missing_general  # >40% frequency, not in resume
+            },
+            'recommendations': self._generate_keyword_recommendations(
+                missing_critical_technical, 
+                missing_important_technical,
+                missing_critical_soft,
+                missing_important_soft,
+                tech_coverage,
+                soft_coverage
+            )
+        }
+    
+    def _generate_keyword_recommendations(self, 
+                                         critical_tech: List[Dict],
+                                         important_tech: List[Dict],
+                                         critical_soft: List[Dict],
+                                         important_soft: List[Dict],
+                                         tech_coverage: float,
+                                         soft_coverage: float) -> List[str]:
+        """
+        Generate recommendations based on missing high-frequency keywords.
+        
+        Args:
+            critical_tech: Critical missing technical keywords
+            important_tech: Important missing technical keywords
+            critical_soft: Critical missing soft skills
+            important_soft: Important missing soft skills
+            tech_coverage: Technical keyword coverage percentage
+            soft_coverage: Soft skills coverage percentage
+            
+        Returns:
+            List of actionable recommendations
+        """
+        recommendations = []
+        
+        # Critical technical keywords (high priority)
+        if critical_tech:
+            top_critical = [k['keyword'] for k in critical_tech[:5]]
+            recommendations.append(
+                f"🔴 HIGH PRIORITY: Add these critical technical skills appearing in 50%+ of jobs: "
+                f"{', '.join(top_critical)}"
+            )
+        
+        # Important technical keywords (medium priority)
+        if important_tech:
+            top_important = [k['keyword'] for k in important_tech[:5]]
+            recommendations.append(
+                f"🟡 MEDIUM PRIORITY: Consider adding these technical skills appearing in 30-50% of jobs: "
+                f"{', '.join(top_important)}"
+            )
+        
+        # Critical soft skills
+        if critical_soft:
+            top_soft = [k['keyword'] for k in critical_soft[:3]]
+            recommendations.append(
+                f"🔴 HIGH PRIORITY: Highlight these soft skills appearing in 50%+ of jobs: "
+                f"{', '.join(top_soft)}"
+            )
+        
+        # Important soft skills
+        if important_soft:
+            top_soft = [k['keyword'] for k in important_soft[:3]]
+            recommendations.append(
+                f"🟡 MEDIUM PRIORITY: Include these soft skills appearing in 30-50% of jobs: "
+                f"{', '.join(top_soft)}"
+            )
+        
+        # Coverage-based recommendations
+        if tech_coverage < 40:
+            recommendations.append(
+                f"⚠️ Your technical skills coverage is low ({tech_coverage}%). "
+                f"Focus on adding the most common technical requirements from job postings."
+            )
+        elif tech_coverage >= 70:
+            recommendations.append(
+                f"✅ Excellent technical skills coverage ({tech_coverage}%)! "
+                f"Your resume aligns well with common technical requirements."
+            )
+        
+        if soft_coverage < 40:
+            recommendations.append(
+                f"⚠️ Your soft skills coverage is low ({soft_coverage}%). "
+                f"Add more examples demonstrating the soft skills employers are seeking."
+            )
+        elif soft_coverage >= 70:
+            recommendations.append(
+                f"✅ Great soft skills coverage ({soft_coverage}%)! "
+                f"You're highlighting the soft skills employers want to see."
+            )
+        
+        # General advice
+        if not critical_tech and not critical_soft and tech_coverage >= 60 and soft_coverage >= 60:
+            recommendations.append(
+                "🎯 Your resume is well-optimized for these job postings! "
+                "Continue to tailor it for specific applications."
+            )
+        
+        return recommendations
 
 
 # Singleton instance
