@@ -1,6 +1,7 @@
 """
 Job Storage Manager
 Manages persistent storage of scraped job data with error handling and retry mechanisms
+Includes application status tracking with complete history management
 """
 
 import json
@@ -11,6 +12,22 @@ from typing import List, Dict, Optional, Set
 from datetime import datetime
 from threading import Lock
 import logging
+
+# Import application status models
+try:
+    from application_status import (
+        ApplicationStatus, 
+        ApplicationStatusManager,
+        StatusHistory,
+        create_status_summary
+    )
+except ImportError:
+    from backend.application_status import (
+        ApplicationStatus, 
+        ApplicationStatusManager,
+        StatusHistory,
+        create_status_summary
+    )
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -31,13 +48,20 @@ class JobStorageManager:
         self.jobs_file = os.path.join(storage_dir, 'jobs.json')
         self.metadata_file = os.path.join(storage_dir, 'metadata.json')
         self.errors_file = os.path.join(storage_dir, 'scraping_errors.json')
+        self.status_history_file = os.path.join(storage_dir, 'status_history.json')
         self.lock = Lock()  # Thread safety for concurrent access
+        
+        # Initialize application status manager
+        self.status_manager = ApplicationStatusManager()
         
         # Create storage directory if it doesn't exist
         os.makedirs(storage_dir, exist_ok=True)
         
         # Initialize storage files if they don't exist
         self._initialize_storage()
+        
+        # Load existing status histories
+        self._load_status_histories()
     
     def _initialize_storage(self):
         """Initialize storage files with empty structures"""
@@ -55,6 +79,30 @@ class JobStorageManager:
         
         if not os.path.exists(self.errors_file):
             self._write_json(self.errors_file, {"errors": []})
+        
+        if not os.path.exists(self.status_history_file):
+            self._write_json(self.status_history_file, {
+                "created_at": datetime.now().isoformat(),
+                "last_updated": datetime.now().isoformat(),
+                "histories": []
+            })
+    
+    def _load_status_histories(self):
+        """Load existing status histories from file"""
+        try:
+            if os.path.exists(self.status_history_file):
+                self.status_manager.import_from_json(self.status_history_file)
+                logger.info(f"Loaded {len(self.status_manager.histories)} status histories")
+        except Exception as e:
+            logger.error(f"Error loading status histories: {e}")
+    
+    def _save_status_histories(self) -> bool:
+        """Save current status histories to file"""
+        try:
+            return self.status_manager.export_to_json(self.status_history_file)
+        except Exception as e:
+            logger.error(f"Error saving status histories: {e}")
+            return False
     
     def _read_json(self, filepath: str, max_retries: int = 3) -> Optional[Dict]:
         """
@@ -883,3 +931,342 @@ class JobStorageManager:
                 "status_counts": {},
                 "error": str(e)
             }
+    
+    # ========== Enhanced Status History Tracking Methods ==========
+    
+    def create_status_history(self, job_id: str, initial_status: str = "Pending") -> bool:
+        """
+        Create a new status history for a job
+        
+        Args:
+            job_id: Unique job identifier
+            initial_status: Initial status (default: Pending)
+            
+        Returns:
+            True if successful
+        """
+        try:
+            status = ApplicationStatus.from_string(initial_status)
+            self.status_manager.create_history(job_id, status)
+            self._save_status_histories()
+            return True
+        except Exception as e:
+            logger.error(f"Error creating status history for {job_id}: {e}")
+            return False
+    
+    def update_job_status_with_history(
+        self, 
+        job_id: str, 
+        new_status: str, 
+        notes: Optional[str] = None,
+        user_id: Optional[str] = None,
+        update_job_record: bool = True
+    ) -> Dict:
+        """
+        Update job status with full history tracking
+        
+        Args:
+            job_id: Job identifier
+            new_status: New status string
+            notes: Optional notes about the status change
+            user_id: Optional user who made the change
+            update_job_record: Whether to also update the job record
+            
+        Returns:
+            Dict with success status and details
+        """
+        try:
+            # Convert status string to enum
+            status_enum = ApplicationStatus.from_string(new_status)
+            
+            # Update in status manager
+            success = self.status_manager.update_status(
+                job_id, 
+                status_enum, 
+                notes=notes, 
+                user_id=user_id,
+                create_if_missing=True
+            )
+            
+            if not success:
+                return {
+                    "success": False,
+                    "error": "Invalid status transition",
+                    "job_id": job_id
+                }
+            
+            # Save status histories
+            self._save_status_histories()
+            
+            # Optionally update the job record itself
+            if update_job_record:
+                update_data = {
+                    "application_status": new_status,
+                    "status_updated_at": datetime.now().isoformat()
+                }
+                if new_status == "Applied" and notes:
+                    update_data["applied_date"] = datetime.now().isoformat()
+                    
+                self.update_job_status(job_id, new_status)
+            
+            # Get updated history
+            history = self.status_manager.get_history(job_id)
+            
+            return {
+                "success": True,
+                "job_id": job_id,
+                "new_status": new_status,
+                "transition_count": history.get_transition_count() if history else 0,
+                "days_in_status": history.get_days_in_current_status() if history else 0
+            }
+            
+        except ValueError as e:
+            return {
+                "success": False,
+                "error": f"Invalid status: {str(e)}",
+                "job_id": job_id
+            }
+        except Exception as e:
+            logger.error(f"Error updating job status with history: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "job_id": job_id
+            }
+    
+    def get_job_status_history(self, job_id: str) -> Optional[Dict]:
+        """
+        Get complete status history for a job
+        
+        Args:
+            job_id: Job identifier
+            
+        Returns:
+            Status history dict or None
+        """
+        try:
+            history = self.status_manager.get_history(job_id)
+            if history:
+                return create_status_summary(history)
+            return None
+        except Exception as e:
+            logger.error(f"Error getting status history for {job_id}: {e}")
+            return None
+    
+    def get_all_status_histories(self) -> List[Dict]:
+        """
+        Get all status histories
+        
+        Returns:
+            List of status history summaries
+        """
+        try:
+            return [
+                create_status_summary(history) 
+                for history in self.status_manager.histories.values()
+            ]
+        except Exception as e:
+            logger.error(f"Error getting all status histories: {e}")
+            return []
+    
+    def bulk_update_statuses(self, updates: List[Dict[str, any]]) -> Dict:
+        """
+        Perform bulk status updates with history tracking
+        
+        Args:
+            updates: List of update dicts with job_id, status, notes, user_id
+            
+        Returns:
+            Results summary
+        """
+        try:
+            # Use status manager's bulk update
+            results = self.status_manager.bulk_update(updates)
+            
+            # Save status histories
+            self._save_status_histories()
+            
+            # Optionally update job records
+            for update in updates:
+                job_id = update.get("job_id")
+                status = update.get("status")
+                if job_id and status:
+                    try:
+                        self.update_job_status(job_id, status)
+                    except Exception as e:
+                        logger.warning(f"Could not update job record for {job_id}: {e}")
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"Error in bulk status update: {e}")
+            return {
+                "total": 0,
+                "successful": 0,
+                "failed": 0,
+                "error": str(e)
+            }
+    
+    def get_jobs_by_status_with_history(self, status: str) -> List[Dict]:
+        """
+        Get all jobs with a specific status including history
+        
+        Args:
+            status: Status to filter by
+            
+        Returns:
+            List of jobs with status and history info
+        """
+        try:
+            status_enum = ApplicationStatus.from_string(status)
+            job_ids = self.status_manager.get_jobs_by_status(status_enum)
+            
+            result = []
+            for job_id in job_ids:
+                job = self.get_job_by_id(job_id)
+                if job:
+                    history = self.get_job_status_history(job_id)
+                    job["status_history"] = history
+                    result.append(job)
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error getting jobs by status: {e}")
+            return []
+    
+    def get_enhanced_status_summary(self) -> Dict:
+        """
+        Get enhanced status summary with history statistics
+        
+        Returns:
+            Comprehensive status summary
+        """
+        try:
+            # Get basic summary
+            basic_summary = self.get_status_summary()
+            
+            # Get status manager statistics
+            manager_stats = self.status_manager.get_statistics()
+            
+            # Combine summaries
+            enhanced_summary = {
+                **basic_summary,
+                "history_stats": manager_stats,
+                "average_transitions_per_job": manager_stats.get("average_transitions", 0),
+                "average_days_in_current_status": manager_stats.get("average_days_in_current_status", 0)
+            }
+            
+            return enhanced_summary
+            
+        except Exception as e:
+            logger.error(f"Error getting enhanced status summary: {e}")
+            return {
+                "error": str(e)
+            }
+    
+    def get_status_timeline(self, job_id: str) -> List[Dict]:
+        """
+        Get timeline of status changes for a job
+        
+        Args:
+            job_id: Job identifier
+            
+        Returns:
+            List of status transitions with timestamps
+        """
+        try:
+            history = self.status_manager.get_history(job_id)
+            if not history:
+                return []
+            
+            timeline = []
+            for transition in history.transitions:
+                timeline.append({
+                    "from_status": transition.from_status.value if transition.from_status else None,
+                    "to_status": transition.to_status.value,
+                    "timestamp": transition.timestamp.isoformat(),
+                    "date": transition.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                    "notes": transition.notes,
+                    "user_id": transition.user_id
+                })
+            
+            return timeline
+            
+        except Exception as e:
+            logger.error(f"Error getting status timeline for {job_id}: {e}")
+            return []
+    
+    def get_jobs_pending_action(self, days_threshold: int = 7) -> List[Dict]:
+        """
+        Get jobs that have been in current status for too long
+        
+        Args:
+            days_threshold: Number of days to consider as "too long"
+            
+        Returns:
+            List of jobs needing attention
+        """
+        try:
+            pending_jobs = []
+            
+            for job_id, history in self.status_manager.histories.items():
+                days_in_status = history.get_days_in_current_status()
+                
+                if days_in_status >= days_threshold:
+                    job = self.get_job_by_id(job_id)
+                    if job:
+                        pending_jobs.append({
+                            "job_id": job_id,
+                            "title": job.get("title"),
+                            "company": job.get("company"),
+                            "current_status": history.current_status.value,
+                            "days_in_status": days_in_status,
+                            "last_updated": history.updated_at.isoformat()
+                        })
+            
+            # Sort by days in status (descending)
+            pending_jobs.sort(key=lambda x: x["days_in_status"], reverse=True)
+            
+            return pending_jobs
+            
+        except Exception as e:
+            logger.error(f"Error getting jobs pending action: {e}")
+            return []
+    
+    def export_status_report(self, filepath: str) -> bool:
+        """
+        Export comprehensive status report to JSON
+        
+        Args:
+            filepath: Path to output file
+            
+        Returns:
+            True if successful
+        """
+        try:
+            report = {
+                "generated_at": datetime.now().isoformat(),
+                "summary": self.get_enhanced_status_summary(),
+                "all_histories": self.get_all_status_histories(),
+                "jobs_pending_action": self.get_jobs_pending_action(),
+                "status_distribution": {}
+            }
+            
+            # Add status distribution
+            for status in ApplicationStatus.get_all_statuses():
+                jobs = self.get_jobs_by_status_with_history(status)
+                report["status_distribution"][status] = {
+                    "count": len(jobs),
+                    "jobs": jobs
+                }
+            
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(report, f, indent=2, ensure_ascii=False)
+            
+            logger.info(f"Exported status report to {filepath}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error exporting status report: {e}")
+            return False
