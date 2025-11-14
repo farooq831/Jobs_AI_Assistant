@@ -3742,6 +3742,317 @@ def batch_update_statuses():
         return jsonify({'error': f'Batch update failed: {str(e)}'}), 500
 
 
+# ========== Enhanced Status History Tracking Endpoints (Task 8.2) ==========
+
+@app.route('/api/jobs/status-history/<job_id>', methods=['POST'])
+def create_job_status_history(job_id):
+    """
+    Create a new status history for a job
+    
+    POST /api/jobs/status-history/<job_id>
+    Body: {
+        "initial_status": "Pending" (optional, default: Pending)
+    }
+    """
+    try:
+        data = request.get_json() or {}
+        initial_status = data.get('initial_status', 'Pending')
+        
+        success = storage_manager.create_status_history(job_id, initial_status)
+        
+        if success:
+            return jsonify({
+                'success': True,
+                'message': f'Status history created for job {job_id}',
+                'job_id': job_id,
+                'initial_status': initial_status
+            }), 201
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to create status history'
+            }), 400
+            
+    except Exception as e:
+        return jsonify({'error': f'Create status history failed: {str(e)}'}), 500
+
+
+@app.route('/api/jobs/status-history/<job_id>', methods=['PUT'])
+def update_job_status_with_history(job_id):
+    """
+    Update job status with full history tracking
+    
+    PUT /api/jobs/status-history/<job_id>
+    Body: {
+        "status": "Applied",
+        "notes": "Submitted application via LinkedIn" (optional),
+        "user_id": "user123" (optional),
+        "update_job_record": true (optional, default: true)
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data or 'status' not in data:
+            return jsonify({'error': 'Status is required'}), 400
+        
+        result = storage_manager.update_job_status_with_history(
+            job_id=job_id,
+            new_status=data['status'],
+            notes=data.get('notes'),
+            user_id=data.get('user_id'),
+            update_job_record=data.get('update_job_record', True)
+        )
+        
+        if result.get('success'):
+            return jsonify(result), 200
+        else:
+            return jsonify(result), 400
+            
+    except Exception as e:
+        return jsonify({'error': f'Status update failed: {str(e)}'}), 500
+
+
+@app.route('/api/jobs/status-history/<job_id>', methods=['GET'])
+def get_job_status_history(job_id):
+    """
+    Get complete status history for a job
+    
+    GET /api/jobs/status-history/<job_id>
+    """
+    try:
+        history = storage_manager.get_job_status_history(job_id)
+        
+        if history:
+            return jsonify({
+                'success': True,
+                'history': history
+            }), 200
+        else:
+            return jsonify({
+                'success': False,
+                'error': f'No status history found for job {job_id}'
+            }), 404
+            
+    except Exception as e:
+        return jsonify({'error': f'Failed to get status history: {str(e)}'}), 500
+
+
+@app.route('/api/jobs/status-histories', methods=['GET'])
+def get_all_status_histories():
+    """
+    Get all status histories
+    
+    GET /api/jobs/status-histories
+    Query params:
+        - limit: max number of histories to return (optional)
+        - status: filter by current status (optional)
+    """
+    try:
+        histories = storage_manager.get_all_status_histories()
+        
+        # Apply filters
+        status_filter = request.args.get('status')
+        if status_filter:
+            histories = [h for h in histories if h.get('current_status') == status_filter]
+        
+        # Apply limit
+        limit = request.args.get('limit', type=int)
+        if limit:
+            histories = histories[:limit]
+        
+        return jsonify({
+            'success': True,
+            'count': len(histories),
+            'histories': histories
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': f'Failed to get status histories: {str(e)}'}), 500
+
+
+@app.route('/api/jobs/status-history/bulk', methods=['POST'])
+def bulk_update_job_statuses():
+    """
+    Perform bulk status updates with history tracking
+    
+    POST /api/jobs/status-history/bulk
+    Body: {
+        "updates": [
+            {
+                "job_id": "job_123",
+                "status": "Applied",
+                "notes": "Applied via company website" (optional),
+                "user_id": "user123" (optional)
+            },
+            ...
+        ]
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data or 'updates' not in data:
+            return jsonify({'error': 'Updates array is required'}), 400
+        
+        results = storage_manager.bulk_update_statuses(data['updates'])
+        
+        return jsonify({
+            'success': True,
+            'results': results
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': f'Bulk update failed: {str(e)}'}), 500
+
+
+@app.route('/api/jobs/status-by-status/<status>', methods=['GET'])
+def get_jobs_by_status_with_history(status):
+    """
+    Get all jobs with a specific status including history
+    
+    GET /api/jobs/status-by-status/<status>
+    """
+    try:
+        jobs = storage_manager.get_jobs_by_status_with_history(status)
+        
+        return jsonify({
+            'success': True,
+            'status': status,
+            'count': len(jobs),
+            'jobs': jobs
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': f'Failed to get jobs by status: {str(e)}'}), 500
+
+
+@app.route('/api/jobs/status-summary/enhanced', methods=['GET'])
+def get_enhanced_status_summary():
+    """
+    Get enhanced status summary with history statistics
+    
+    GET /api/jobs/status-summary/enhanced
+    """
+    try:
+        summary = storage_manager.get_enhanced_status_summary()
+        
+        return jsonify({
+            'success': True,
+            'summary': summary
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': f'Failed to get enhanced summary: {str(e)}'}), 500
+
+
+@app.route('/api/jobs/status-timeline/<job_id>', methods=['GET'])
+def get_status_timeline(job_id):
+    """
+    Get timeline of status changes for a job
+    
+    GET /api/jobs/status-timeline/<job_id>
+    """
+    try:
+        timeline = storage_manager.get_status_timeline(job_id)
+        
+        return jsonify({
+            'success': True,
+            'job_id': job_id,
+            'timeline_count': len(timeline),
+            'timeline': timeline
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': f'Failed to get status timeline: {str(e)}'}), 500
+
+
+@app.route('/api/jobs/pending-action', methods=['GET'])
+def get_jobs_pending_action():
+    """
+    Get jobs that have been in current status for too long
+    
+    GET /api/jobs/pending-action
+    Query params:
+        - days_threshold: number of days to consider as "too long" (default: 7)
+    """
+    try:
+        days_threshold = request.args.get('days_threshold', default=7, type=int)
+        
+        jobs = storage_manager.get_jobs_pending_action(days_threshold)
+        
+        return jsonify({
+            'success': True,
+            'days_threshold': days_threshold,
+            'count': len(jobs),
+            'jobs': jobs
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': f'Failed to get pending jobs: {str(e)}'}), 500
+
+
+@app.route('/api/jobs/status-report/export', methods=['POST'])
+def export_status_report():
+    """
+    Export comprehensive status report to JSON
+    
+    POST /api/jobs/status-report/export
+    Body: {
+        "filepath": "reports/status_report.json" (optional, default: data/status_report.json)
+    }
+    """
+    try:
+        data = request.get_json() or {}
+        filepath = data.get('filepath', 'data/status_report.json')
+        
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        
+        success = storage_manager.export_status_report(filepath)
+        
+        if success:
+            return jsonify({
+                'success': True,
+                'message': 'Status report exported successfully',
+                'filepath': filepath
+            }), 200
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to export status report'
+            }), 500
+            
+    except Exception as e:
+        return jsonify({'error': f'Export failed: {str(e)}'}), 500
+
+
+@app.route('/api/jobs/status-report/download', methods=['GET'])
+def download_status_report():
+    """
+    Download the status report file
+    
+    GET /api/jobs/status-report/download
+    Query params:
+        - filepath: path to report file (optional, default: data/status_report.json)
+    """
+    try:
+        filepath = request.args.get('filepath', 'data/status_report.json')
+        
+        if not os.path.exists(filepath):
+            return jsonify({'error': 'Report file not found'}), 404
+        
+        return send_file(
+            filepath,
+            mimetype='application/json',
+            as_attachment=True,
+            download_name='status_report.json'
+        )
+        
+    except Exception as e:
+        return jsonify({'error': f'Download failed: {str(e)}'}), 500
+
+
 if __name__ == '__main__':
     # Development server. For production use a WSGI server (gunicorn).
     app.run(host='0.0.0.0', port=5000, debug=True)
