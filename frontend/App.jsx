@@ -1,9 +1,12 @@
-import React from 'react';
+import React, { useState } from 'react';
 import UserDetailsForm from './UserDetailsForm';
 import ResumeUpload from './ResumeUpload';
+import JobDashboard from './JobDashboard';
 import './App.css';
 
 function App() {
+  const [activeTab, setActiveTab] = useState('dashboard');
+
   return (
     <div className="App">
       <div className="container-fluid">
@@ -15,8 +18,48 @@ function App() {
             </header>
           </div>
         </div>
-        <UserDetailsForm />
-        <ResumeUpload />
+
+        {/* Navigation Tabs */}
+        <div className="row mb-4">
+          <div className="col-12">
+            <ul className="nav nav-tabs">
+              <li className="nav-item">
+                <button
+                  className={`nav-link ${activeTab === 'dashboard' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('dashboard')}
+                >
+                  <i className="bi bi-grid-3x3-gap me-2"></i>
+                  Job Dashboard
+                </button>
+              </li>
+              <li className="nav-item">
+                <button
+                  className={`nav-link ${activeTab === 'profile' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('profile')}
+                >
+                  <i className="bi bi-person me-2"></i>
+                  User Profile
+                </button>
+              </li>
+              <li className="nav-item">
+                <button
+                  className={`nav-link ${activeTab === 'resume' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('resume')}
+                >
+                  <i className="bi bi-file-text me-2"></i>
+                  Resume Upload
+                </button>
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        {/* Tab Content */}
+        <div className="tab-content">
+          {activeTab === 'dashboard' && <JobDashboard />}
+          {activeTab === 'profile' && <UserDetailsForm />}
+          {activeTab === 'resume' && <ResumeUpload />}
+        </div>
       </div>
     </div>
   );
