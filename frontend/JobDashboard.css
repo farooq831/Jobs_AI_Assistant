@@ -1,0 +1,70 @@
+.job-dashboard {
+  padding: 20px 0;
+}
+
+.jobs-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+  gap: 1.5rem;
+}
+
+.job-card {
+  transition: transform 0.2s, box-shadow 0.2s;
+  height: 100%;
+}
+
+.job-card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.job-card.border-danger {
+  border-left: 4px solid #dc3545;
+}
+
+.job-card.border-warning {
+  border-left: 4px solid #ffc107;
+}
+
+.job-card.border-success {
+  border-left: 4px solid #28a745;
+}
+
+.job-card.border-light {
+  border-left: 4px solid #dee2e6;
+}
+
+.job-details p {
+  font-size: 0.9rem;
+  color: #6c757d;
+}
+
+.job-details i {
+  margin-right: 5px;
+}
+
+.text-truncate-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.9rem;
+  color: #495057;
+}
+
+.card-title {
+  color: #2c3e50;
+  font-weight: 600;
+}
+
+.card-subtitle {
+  font-weight: 500;
+}
+
+/* Mobile responsive */
+@media (max-width: 768px) {
+  .jobs-grid {
+    grid-template-columns: 1fr;
+  }
+}
