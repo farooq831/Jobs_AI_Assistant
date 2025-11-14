@@ -7,7 +7,8 @@ const UserDetailsForm = () => {
     location: '',
     salaryMin: '',
     salaryMax: '',
-    jobTitles: ''
+    jobTitles: '',
+    jobTypes: [] // Remote, Onsite, Hybrid
   });
 
   const [errors, setErrors] = useState({});
@@ -27,6 +28,25 @@ const UserDetailsForm = () => {
       setErrors(prev => ({
         ...prev,
         [name]: ''
+      }));
+    }
+  };
+
+  // Handle job type checkbox changes
+  const handleJobTypeChange = (e) => {
+    const { value, checked } = e.target;
+    setFormData(prev => {
+      const newJobTypes = checked
+        ? [...prev.jobTypes, value]
+        : prev.jobTypes.filter(type => type !== value);
+      return { ...prev, jobTypes: newJobTypes };
+    });
+    
+    // Clear error for job types
+    if (errors.jobTypes) {
+      setErrors(prev => ({
+        ...prev,
+        jobTypes: ''
       }));
     }
   };
@@ -82,6 +102,11 @@ const UserDetailsForm = () => {
       }
     }
 
+    // Job types validation
+    if (formData.jobTypes.length === 0) {
+      newErrors.jobTypes = 'Please select at least one job type';
+    }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -104,7 +129,8 @@ const UserDetailsForm = () => {
         location: formData.location.trim(),
         salary_min: parseFloat(formData.salaryMin),
         salary_max: parseFloat(formData.salaryMax),
-        job_titles: formData.jobTitles.split(',').map(t => t.trim()).filter(t => t)
+        job_titles: formData.jobTitles.split(',').map(t => t.trim()).filter(t => t),
+        job_types: formData.jobTypes
       };
 
       const response = await fetch('http://localhost:5000/api/user-details', {
@@ -125,7 +151,8 @@ const UserDetailsForm = () => {
           location: '',
           salaryMin: '',
           salaryMax: '',
-          jobTitles: ''
+          jobTitles: '',
+          jobTypes: []
         });
         setErrors({});
       } else {
@@ -261,7 +288,7 @@ const UserDetailsForm = () => {
                 </div>
 
                 {/* Job Titles Field */}
-                <div className="mb-4">
+                <div className="mb-3">
                   <label htmlFor="jobTitles" className="form-label">
                     Job Titles <span className="text-danger">*</span>
                   </label>
@@ -280,6 +307,63 @@ const UserDetailsForm = () => {
                   )}
                   <small className="form-text text-muted">
                     Enter job titles separated by commas
+                  </small>
+                </div>
+
+                {/* Job Types Field */}
+                <div className="mb-4">
+                  <label className="form-label">
+                    Job Type <span className="text-danger">*</span>
+                  </label>
+                  <div className="border rounded p-3 bg-light">
+                    <div className="form-check form-check-inline">
+                      <input
+                        className="form-check-input"
+                        type="checkbox"
+                        id="jobTypeRemote"
+                        value="Remote"
+                        checked={formData.jobTypes.includes('Remote')}
+                        onChange={handleJobTypeChange}
+                      />
+                      <label className="form-check-label" htmlFor="jobTypeRemote">
+                        <i className="bi bi-house-door me-1"></i>
+                        Remote
+                      </label>
+                    </div>
+                    <div className="form-check form-check-inline">
+                      <input
+                        className="form-check-input"
+                        type="checkbox"
+                        id="jobTypeOnsite"
+                        value="Onsite"
+                        checked={formData.jobTypes.includes('Onsite')}
+                        onChange={handleJobTypeChange}
+                      />
+                      <label className="form-check-label" htmlFor="jobTypeOnsite">
+                        <i className="bi bi-building me-1"></i>
+                        Onsite
+                      </label>
+                    </div>
+                    <div className="form-check form-check-inline">
+                      <input
+                        className="form-check-input"
+                        type="checkbox"
+                        id="jobTypeHybrid"
+                        value="Hybrid"
+                        checked={formData.jobTypes.includes('Hybrid')}
+                        onChange={handleJobTypeChange}
+                      />
+                      <label className="form-check-label" htmlFor="jobTypeHybrid">
+                        <i className="bi bi-shuffle me-1"></i>
+                        Hybrid
+                      </label>
+                    </div>
+                  </div>
+                  {errors.jobTypes && (
+                    <div className="text-danger small mt-1">{errors.jobTypes}</div>
+                  )}
+                  <small className="form-text text-muted d-block mt-1">
+                    Select all job types you're interested in
                   </small>
                 </div>
 

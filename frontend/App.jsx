@@ -2,10 +2,14 @@ import React, { useState } from 'react';
 import UserDetailsForm from './UserDetailsForm';
 import ResumeUpload from './ResumeUpload';
 import JobDashboard from './JobDashboard';
+import ExportControls from './ExportControls';
+import ExcelUploadControl from './ExcelUploadControl';
 import './App.css';
 
 function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [userId, setUserId] = useState('user_001'); // Demo user ID
+  const [resumeId, setResumeId] = useState(null);
 
   const renderTabContent = () => {
     switch (activeTab) {
@@ -15,6 +19,25 @@ function App() {
         return <UserDetailsForm />;
       case 'resume':
         return <ResumeUpload />;
+      case 'export':
+        return (
+          <div className="container">
+            <div className="row">
+              <div className="col-md-6 mb-4">
+                <ExportControls userId={userId} resumeId={resumeId} showCustomExport={true} />
+              </div>
+              <div className="col-md-6 mb-4">
+                <ExcelUploadControl 
+                  userId={userId} 
+                  onUploadSuccess={(data) => {
+                    console.log('Upload successful:', data);
+                    // Optionally refresh dashboard or show notification
+                  }} 
+                />
+              </div>
+            </div>
+          </div>
+        );
       default:
         return <JobDashboard />;
     }
@@ -57,6 +80,13 @@ function App() {
               >
                 <i className="bi bi-file-text me-2"></i>
                 Resume
+              </button>
+              <button
+                className={`nav-link ${activeTab === 'export' ? 'active' : ''}`}
+                onClick={() => setActiveTab('export')}
+              >
+                <i className="bi bi-arrow-down-up me-2"></i>
+                Export/Import
               </button>
             </nav>
           </div>
