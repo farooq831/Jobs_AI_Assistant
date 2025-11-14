@@ -2,46 +2,39 @@ import React from 'react';
 import './StatusBadge.css';
 
 const StatusBadge = ({ status }) => {
-  const getStatusConfig = (statusValue) => {
-    const normalizedStatus = statusValue?.toLowerCase() || 'pending';
-    
-    const statusMap = {
-      pending: {
-        label: 'Pending',
-        color: 'secondary',
-        icon: 'bi-clock'
-      },
-      applied: {
-        label: 'Applied',
-        color: 'primary',
-        icon: 'bi-send-check'
-      },
-      interview: {
-        label: 'Interview',
-        color: 'info',
-        icon: 'bi-calendar-check'
-      },
-      offer: {
-        label: 'Offer',
-        color: 'success',
-        icon: 'bi-trophy'
-      },
-      rejected: {
-        label: 'Rejected',
-        color: 'danger',
-        icon: 'bi-x-circle'
-      }
+  const getStatusClass = (status) => {
+    const statusLower = status?.toLowerCase() || 'pending';
+    const classMap = {
+      'pending': 'status-pending',
+      'applied': 'status-applied',
+      'interview': 'status-interview',
+      'offer': 'status-offer',
+      'rejected': 'status-rejected'
     };
-
-    return statusMap[normalizedStatus] || statusMap.pending;
+    return classMap[statusLower] || 'status-pending';
   };
 
-  const config = getStatusConfig(status);
+  const getStatusIcon = (status) => {
+    const statusLower = status?.toLowerCase() || 'pending';
+    const iconMap = {
+      'pending': 'bi-clock',
+      'applied': 'bi-send',
+      'interview': 'bi-calendar-check',
+      'offer': 'bi-check-circle',
+      'rejected': 'bi-x-circle'
+    };
+    return iconMap[statusLower] || 'bi-clock';
+  };
+
+  const formatStatus = (status) => {
+    if (!status) return 'Pending';
+    return status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
+  };
 
   return (
-    <span className={`badge bg-${config.color} status-badge`}>
-      <i className={`bi ${config.icon} me-1`}></i>
-      {config.label}
+    <span className={`status-badge ${getStatusClass(status)}`}>
+      <i className={`bi ${getStatusIcon(status)} me-1`}></i>
+      {formatStatus(status)}
     </span>
   );
 };
