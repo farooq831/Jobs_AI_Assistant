@@ -1,0 +1,40 @@
+{
+  "jobs": [
+    {
+      "job_id": "test_001",
+      "title": "Senior Python Developer",
+      "company": "Tech Corp",
+      "location": "Remote",
+      "description": "We are looking for an experienced Python developer with Flask and React experience.",
+      "salary": "$120,000 - $150,000",
+      "source": "manual",
+      "url": "https://example.com/job1",
+      "date_posted": "2025-11-15",
+      "status": "Pending"
+    },
+    {
+      "job_id": "test_002",
+      "title": "Full Stack Developer",
+      "company": "Innovation Labs",
+      "location": "New York, NY",
+      "description": "Join our team to build cutting-edge web applications using Python, React, and AWS.",
+      "salary": "$110,000 - $140,000",
+      "source": "manual",
+      "url": "https://example.com/job2",
+      "date_posted": "2025-11-14",
+      "status": "Pending"
+    },
+    {
+      "job_id": "test_003",
+      "title": "Backend Engineer",
+      "company": "Data Solutions Inc",
+      "location": "San Francisco, CA",
+      "description": "Looking for a backend engineer with strong Python and database skills.",
+      "salary": "$130,000 - $160,000",
+      "source": "manual",
+      "url": "https://example.com/job3",
+      "date_posted": "2025-11-13",
+      "status": "Pending"
+    }
+  ]
+}

@@ -8,7 +8,9 @@ import './App.css';
 
 function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
+  // eslint-disable-next-line no-unused-vars
   const [userId, setUserId] = useState('user_001'); // Demo user ID
+  // eslint-disable-next-line no-unused-vars
   const [resumeId, setResumeId] = useState(null);
 
   const renderTabContent = () => {

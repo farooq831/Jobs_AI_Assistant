@@ -696,6 +696,27 @@ def get_stored_jobs():
             "message": f"Error retrieving jobs: {str(e)}"
         }), 500
 
+@app.route('/api/jobs/stored/<user_id>', methods=['GET'])
+def get_user_stored_jobs(user_id):
+    """
+    Endpoint to retrieve all stored jobs for a specific user
+    """
+    try:
+        # Get all jobs (user_id not used for filtering in current implementation)
+        jobs = storage_manager.get_all_jobs()
+        
+        return jsonify({
+            "success": True,
+            "total": len(jobs),
+            "jobs": jobs
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Error retrieving jobs: {str(e)}"
+        }), 500
+
 @app.route('/api/storage/jobs/<job_id>', methods=['GET'])
 def get_stored_job(job_id):
     """
@@ -2890,14 +2911,14 @@ def export_stored_jobs_excel(user_id):
         min_score = request.args.get('min_score', type=float)
         max_score = request.args.get('max_score', type=float)
         
-        # Get storage manager
-        storage = JobStorageManager()
-        
-        # Get jobs
+        # Get jobs using global storage manager
         if highlight_filter:
-            jobs = storage.get_jobs_by_highlight(user_id, highlight_filter)
+            jobs = storage_manager.get_jobs_by_highlight(highlight_filter)
+        elif min_score is not None or max_score is not None:
+            jobs = storage_manager.get_scored_jobs(min_score, max_score)
         else:
-            jobs = storage.get_scored_jobs(user_id, min_score, max_score)
+            # No filters - get all jobs
+            jobs = storage_manager.get_all_jobs()
         
         if not jobs:
             return jsonify({'error': 'No jobs found for this user'}), 404
@@ -2926,13 +2947,20 @@ def export_stored_jobs_excel(user_id):
             include_tips_sheet=include_tips_param and resume_tips is not None
         )
         
+        # Ensure BytesIO is at beginning
+        excel_file.seek(0)
+        
         # Send file
-        return send_file(
+        response = send_file(
             excel_file,
             mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             as_attachment=True,
             download_name=filename
         )
+        response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        response.headers['Content-Transfer-Encoding'] = 'binary'
+        return response
     
     except Exception as e:
         return jsonify({'error': f'Export failed: {str(e)}'}), 500
@@ -3110,14 +3138,14 @@ def export_stored_jobs_csv(user_id):
         min_score = request.args.get('min_score', type=float)
         max_score = request.args.get('max_score', type=float)
         
-        # Get storage manager
-        storage = JobStorageManager()
-        
-        # Get jobs
+        # Get jobs using global storage manager
         if highlight_filter:
-            jobs = storage.get_jobs_by_highlight(user_id, highlight_filter)
+            jobs = storage_manager.get_jobs_by_highlight(highlight_filter)
+        elif min_score is not None or max_score is not None:
+            jobs = storage_manager.get_scored_jobs(min_score, max_score)
         else:
-            jobs = storage.get_scored_jobs(user_id, min_score, max_score)
+            # No filters - get all jobs
+            jobs = storage_manager.get_all_jobs()
         
         if not jobs:
             return jsonify({'error': 'No jobs found for this user'}), 404
@@ -3132,13 +3160,18 @@ def export_stored_jobs_csv(user_id):
             include_description=include_description
         )
         
+        # Ensure BytesIO is at beginning
+        csv_file.seek(0)
+        
         # Send file
-        return send_file(
+        response = send_file(
             csv_file,
             mimetype='text/csv',
             as_attachment=True,
             download_name=filename
         )
+        response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
     
     except Exception as e:
         return jsonify({'error': f'Export failed: {str(e)}'}), 500
@@ -3259,14 +3292,14 @@ def export_stored_jobs_pdf(user_id):
         min_score = request.args.get('min_score', type=float)
         max_score = request.args.get('max_score', type=float)
         
-        # Get storage manager
-        storage = JobStorageManager()
-        
-        # Get jobs
+        # Get jobs using global storage manager
         if highlight_filter:
-            jobs = storage.get_jobs_by_highlight(user_id, highlight_filter)
+            jobs = storage_manager.get_jobs_by_highlight(highlight_filter)
+        elif min_score is not None or max_score is not None:
+            jobs = storage_manager.get_scored_jobs(min_score, max_score)
         else:
-            jobs = storage.get_scored_jobs(user_id, min_score, max_score)
+            # No filters - get all jobs
+            jobs = storage_manager.get_all_jobs()
         
         if not jobs:
             return jsonify({'error': 'No jobs found for this user'}), 404
@@ -3288,13 +3321,20 @@ def export_stored_jobs_pdf(user_id):
             include_tips=include_tips_param
         )
         
+        # Ensure BytesIO is at beginning
+        pdf_file.seek(0)
+        
         # Send file
-        return send_file(
+        response = send_file(
             pdf_file,
             mimetype='application/pdf',
             as_attachment=True,
             download_name=filename
         )
+        response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        response.headers['Content-Transfer-Encoding'] = 'binary'
+        return response
     
     except Exception as e:
         return jsonify({'error': f'Export failed: {str(e)}'}), 500
@@ -3591,6 +3631,7 @@ def apply_excel_updates():
 
 
 @app.route('/api/jobs/status/<job_id>', methods=['PUT'])
+@app.route('/api/jobs/<job_id>/status', methods=['PUT'])
 def update_job_status(job_id):
     """
     Update application status for a single job
@@ -3814,11 +3855,13 @@ def update_job_status_with_history(job_id):
 
 
 @app.route('/api/jobs/status-history/<job_id>', methods=['GET'])
+@app.route('/api/jobs/<job_id>/status/history', methods=['GET'])
 def get_job_status_history(job_id):
     """
     Get complete status history for a job
     
     GET /api/jobs/status-history/<job_id>
+    GET /api/jobs/<job_id>/status/history (alias)
     """
     try:
         history = storage_manager.get_job_status_history(job_id)
@@ -4055,5 +4098,5 @@ def download_status_report():
 
 if __name__ == '__main__':
     # Development server. For production use a WSGI server (gunicorn).
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=False)
 
