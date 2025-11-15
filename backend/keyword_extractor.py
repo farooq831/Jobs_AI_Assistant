@@ -3,7 +3,13 @@ Keyword Extraction Module for Job Matching
 Uses spaCy for NLP-based tokenization and keyword extraction from job descriptions and resumes.
 """
 
-import spacy
+try:
+    import spacy
+    SPACY_AVAILABLE = True
+except Exception:
+    spacy = None
+    SPACY_AVAILABLE = False
+
 from typing import List, Dict, Set, Tuple
 from collections import Counter
 import re
@@ -16,7 +22,8 @@ logger = logging.getLogger(__name__)
 
 class KeywordExtractor:
     """
-    Extract and analyze keywords from job descriptions and resumes using NLP.
+    Extract and analyze keywords from job descriptions and resumes.
+    Uses spaCy if available; otherwise falls back to a lightweight regex-based extractor.
     """
     
     # Technical skills and keywords commonly found in job postings
@@ -50,16 +57,18 @@ class KeywordExtractor:
     
     def __init__(self):
         """Initialize the KeywordExtractor with spaCy model."""
-        try:
-            # Load spaCy English model
-            self.nlp = spacy.load("en_core_web_sm")
-            logger.info("spaCy model loaded successfully")
-        except OSError:
-            logger.warning("spaCy model not found. Attempting to download...")
-            import subprocess
-            subprocess.run(["python", "-m", "spacy", "download", "en_core_web_sm"], check=True)
-            self.nlp = spacy.load("en_core_web_sm")
-            logger.info("spaCy model downloaded and loaded successfully")
+        if SPACY_AVAILABLE:
+            try:
+                # Load spaCy English model
+                self.nlp = spacy.load("en_core_web_sm")
+                logger.info("spaCy model loaded successfully")
+            except Exception:
+                # If model not available, set to None and continue with fallback
+                logger.warning("spaCy model not available at runtime; falling back to lightweight extractor")
+                self.nlp = None
+        else:
+            logger.info("spaCy not available; using lightweight keyword extractor")
+            self.nlp = None
     
     def preprocess_text(self, text: str) -> str:
         """
@@ -109,35 +118,47 @@ class KeywordExtractor:
         
         # Preprocess text
         cleaned_text = self.preprocess_text(text)
-        
-        # Process with spaCy
-        doc = self.nlp(cleaned_text)
-        
-        # Extract tokens
+
         keywords = []
-        
-        # Single word keywords (nouns, proper nouns, adjectives)
-        for token in doc:
-            if (token.pos_ in ['NOUN', 'PROPN', 'ADJ'] and 
-                not token.is_stop and 
-                len(token.text) > 2 and
-                token.text not in self.STOPWORDS_CUSTOM):
-                keywords.append(token.lemma_)
-        
-        # Bigrams (two-word phrases)
-        if include_bigrams:
-            for i in range(len(doc) - 1):
-                token1 = doc[i]
-                token2 = doc[i + 1]
-                
-                # Common patterns for technical terms
-                if ((token1.pos_ in ['NOUN', 'PROPN', 'ADJ'] and 
-                     token2.pos_ in ['NOUN', 'PROPN', 'ADJ']) or
-                    (token1.text in ['machine', 'deep', 'data', 'web', 'full', 'front', 'back'] and
-                     token2.pos_ in ['NOUN', 'PROPN'])):
-                    
-                    bigram = f"{token1.text} {token2.text}"
-                    if bigram not in self.STOPWORDS_CUSTOM:
+
+        # Prefer spaCy if available and model loaded
+        if self.nlp:
+            doc = self.nlp(cleaned_text)
+            # Single word keywords (nouns, proper nouns, adjectives)
+            for token in doc:
+                if (token.pos_ in ['NOUN', 'PROPN', 'ADJ'] and 
+                    not token.is_stop and 
+                    len(token.text) > 2 and
+                    token.text not in self.STOPWORDS_CUSTOM):
+                    keywords.append(token.lemma_)
+
+            # Bigrams (two-word phrases)
+            if include_bigrams:
+                for i in range(len(doc) - 1):
+                    token1 = doc[i]
+                    token2 = doc[i + 1]
+                    if ((token1.pos_ in ['NOUN', 'PROPN', 'ADJ'] and 
+                         token2.pos_ in ['NOUN', 'PROPN', 'ADJ']) or
+                        (token1.text in ['machine', 'deep', 'data', 'web', 'full', 'front', 'back'] and
+                         token2.pos_ in ['NOUN', 'PROPN'])):
+                        bigram = f"{token1.text} {token2.text}"
+                        if bigram not in self.STOPWORDS_CUSTOM:
+                            keywords.append(bigram)
+        else:
+            # Lightweight fallback: split words and match against known skill lists
+            tokens = re.findall(r"\b[\w\-\.]+\b", cleaned_text)
+            for i, tok in enumerate(tokens):
+                t = tok.lower()
+                if len(t) > 2 and t not in self.STOPWORDS_CUSTOM:
+                    # match against known tech/soft skills
+                    if any(t == s or t in s for s in self.TECH_SKILLS):
+                        keywords.append(t)
+                    elif any(t == s or t in s for s in self.SOFT_SKILLS):
+                        keywords.append(t)
+                # bigram fallback
+                if include_bigrams and i < len(tokens) - 1:
+                    bigram = f"{tokens[i].lower()} {tokens[i+1].lower()}"
+                    if bigram not in self.STOPWORDS_CUSTOM and any(bigram == s for s in self.TECH_SKILLS):
                         keywords.append(bigram)
         
         # Count keyword frequencies

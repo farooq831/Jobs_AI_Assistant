@@ -172,7 +172,7 @@ class ExcelExporter:
             highlight = 'white'
         
         description = job.get('description', 'N/A')
-        link = job.get('link', 'N/A')
+        link = job.get('link') or job.get('url', 'N/A')  # Support both 'link' and 'url' fields
         
         # Determine row fill color based on highlight
         fill_color = self._get_fill_color(highlight, overall_score)
@@ -213,6 +213,13 @@ class ExcelExporter:
             # Make highlight bold and centered
             if col_num == 7:
                 cell.font = Font(bold=True)
+                cell.alignment = Alignment(horizontal='center', vertical='center')
+            
+            # Make link clickable and blue
+            if col_num == 9 and value != 'N/A' and value.startswith('http'):
+                cell.hyperlink = value
+                cell.font = Font(color='0563C1', underline='single')
+                cell.value = 'View Job'  # Display text instead of full URL
                 cell.alignment = Alignment(horizontal='center', vertical='center')
     
     def _get_fill_color(self, highlight: str, score: float) -> str:

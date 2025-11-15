@@ -37,11 +37,13 @@ const JobDashboard = ({ userId = 'default_user' }) => {
   // Fetch jobs on component mount
   useEffect(() => {
     fetchJobs();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
   // Apply filters and sorting when jobs or filters change
   useEffect(() => {
     applyFiltersAndSort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobs, searchTerm, highlightFilter, statusFilter, sortBy, sortOrder]);
 
   const fetchJobs = async () => {
@@ -399,6 +401,19 @@ const JobDashboard = ({ userId = 'default_user' }) => {
                       <div className="job-detail-item">
                         <StatusBadge status={job.status || 'pending'} />
                       </div>
+                      {(job.url || job.link) && (
+                        <div className="job-detail-item">
+                          <i className="bi bi-link-45deg"></i>
+                          <a 
+                            href={job.url || job.link} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="job-link"
+                          >
+                            View Job Posting
+                          </a>
+                        </div>
+                      )}
                     </div>
 
                     {job.description && (

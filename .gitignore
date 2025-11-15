@@ -1,12 +1,48 @@
+# Python virtual environments
 .venv/
-.env
+.venv311/
+venv/
+env/
+ENV/
+
+# Python cache
 __pycache__/
+*.py[cod]
+*$py.class
 *.pyc
+
+# Environment variables
+.env
+.env.local
+
+# Node modules
 node_modules/
 frontend/node_modules/
-.DS_Store
-*.log
-.vscode/
+
+# Build files
+frontend/build/
 dist/
-.env.local
+
+# Logs
+*.log
+backend.log
+frontend.log
+frontend/frontend.log
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# VS Code
+.vscode/
+
+# Testing coverage
 .coverage
+htmlcov/
+
+# Python version file
+.python-version
+
+# Uploads directory (keep structure, ignore content)
+uploads/*
+!uploads/.gitkeep
